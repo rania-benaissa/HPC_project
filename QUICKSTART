@@ -1,0 +1,21 @@
+Récupération d'une matrice dans la SuiteSparse Matrix collection
+----------------------------------------------------------------
+
+$ wget https://suitesparse-collection-website.herokuapp.com/MM/JGD_Forest/TF16.tar.gz
+$ tar xzf TF16.tar.gz
+
+(on peut en prendre d'autres sur https://sparse.tamu.edu/)
+
+
+
+Calcul de vecteurs du noyau (Ax == 0)
+-------------------------------------
+
+$ ./lanczos_modp --matrix TF16/TF16.mtx --prime 65537 --right --n 2 --output kernel.mtx
+
+
+
+Vérification du calcul
+----------------------
+
+$ ./checker_modp --matrix TF16/TF16.mtx --prime 65537 --right --kernel kernel.mtx
