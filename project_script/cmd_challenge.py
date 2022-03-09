@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 config = None 
@@ -20,14 +21,19 @@ def help(*args):
 
 
 def prep():
+    CC = os.environ.get('CC', 'gcc')
+    if 'CC' in os.environ:
+        print(f"---> Using {CC}")
     print("---> checking gcc", end='', flush=True)
     # ensure gcc works
-    subprocess.run('gcc --version', shell=True, check=True, capture_output=True)
+    result = subprocess.run(f'{CC} --version', shell=True, check=True, capture_output=True)
+    if "clang" in result.stdout.decode():
+        raise ValueError(f"Your {CC} is in fact clang (common on OS X). This will not work. Set the CC environmnent variable.")
     print(" [OK]")
     
     # ensure gen_uniform is compiled
     print(f"---> compiling {config.MYDIR}/gen_uniform.c", end='', flush=True)
-    subprocess.run(f'gcc {config.MYDIR}/gen_uniform.c -O3 -o {config.MYDIR}/gen_uniform', shell=True, check=True, capture_output=True)
+    subprocess.run(f'{CC} {config.MYDIR}/gen_uniform.c -O3 -o {config.MYDIR}/gen_uniform', shell=True, check=True, capture_output=True)
     print(" [OK]")
 
 

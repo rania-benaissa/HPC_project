@@ -9,7 +9,6 @@
 #include <time.h>
 #include <sys/time.h>
 #include <assert.h>
-#include <omp.h>
 
 typedef uint64_t u64;
 typedef uint32_t u32;
