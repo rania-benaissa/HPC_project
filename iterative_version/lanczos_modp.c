@@ -27,7 +27,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <assert.h>
-#include <mpi.h>
+
 #include <mmio.h>
 
 typedef uint64_t u64;
@@ -203,141 +203,72 @@ void process_command_line_options(int argc, char **argv)
 /****************** sparse matrix operations ******************/
 
 /* Load a matrix from a file in "list of triplet" representation */
-void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filename, int my_rank, int p)
+void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
 {
-        int MSG_TAG = 10;
+        int nrows = 0;
+        int ncols = 0;
+        long nnz = 0;
 
-        if (my_rank == 0)
+        printf("Loading matrix from %s\n", filename);
+        fflush(stdout);
+
+        FILE *f = fopen(filename, "r");
+        if (f == NULL)
+                err(1, "impossible d'ouvrir %s", filename);
+
+        /* read the header, check format */
+        MM_typecode matcode;
+        if (mm_read_banner(f, &matcode) != 0)
+                errx(1, "Could not process Matrix Market banner.\n");
+        if (!mm_is_matrix(matcode) || !mm_is_sparse(matcode))
+                errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)",
+                     mm_typecode_to_str(matcode));
+        if (!mm_is_general(matcode) || !mm_is_integer(matcode))
+                errx(1, "Matrix type [%s] not supported (only integer general are OK)",
+                     mm_typecode_to_str(matcode));
+        if (mm_read_mtx_crd_size(f, &nrows, &ncols, &nnz) != 0)
+                errx(1, "Cannot read matrix size");
+        fprintf(stderr, "  - [%s] %d x %d with %ld nz\n", mm_typecode_to_str(matcode), nrows, ncols, nnz);
+        fprintf(stderr, "  - Allocating %.1f MByte\n", 1e-6 * (12.0 * nnz));
+
+        /* Allocate memory for the matrix */
+        int *Mi = malloc(nnz * sizeof(*Mi));
+        int *Mj = malloc(nnz * sizeof(*Mj));
+        u32 *Mx = malloc(nnz * sizeof(*Mx));
+        if (Mi == NULL || Mj == NULL || Mx == NULL)
+                err(1, "Cannot allocate sparse matrix");
+
+        /* Parse and load actual entries */
+        double start = wtime();
+        for (long u = 0; u < nnz; u++)
         {
-                int nrows = 0;
-                int ncols = 0;
-                long nnz = 0;
+                int i, j;
+                u32 x;
+                if (3 != fscanf(f, "%d %d %d\n", &i, &j, &x))
+                        errx(1, "parse error entry %ld\n", u);
+                Mi[u] = i - 1; /* MatrixMarket is 1-based */
+                Mj[u] = j - 1;
+                Mx[u] = x % prime;
 
-                printf("Loading matrix from %s\n", filename);
-                fflush(stdout);
-
-                FILE *f = fopen(filename, "r");
-
-                if (f == NULL)
-                        err(1, "impossible d'ouvrir %s", filename);
-
-                /* read the header, check format */
-                MM_typecode matcode;
-                if (mm_read_banner(f, &matcode) != 0)
-                        errx(1, "Could not process Matrix Market banner.\n");
-                if (!mm_is_matrix(matcode) || !mm_is_sparse(matcode))
-                        errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)",
-                             mm_typecode_to_str(matcode));
-                if (!mm_is_general(matcode) || !mm_is_integer(matcode))
-                        errx(1, "Matrix type [%s] not supported (only integer general are OK)",
-                             mm_typecode_to_str(matcode));
-                if (mm_read_mtx_crd_size(f, &nrows, &ncols, &nnz) != 0)
-                        errx(1, "Cannot read matrix size");
-
-                fprintf(stderr, "  - [%s] %d x %d with %ld nz\n", mm_typecode_to_str(matcode), nrows, ncols, nnz);
-                fprintf(stderr, "  - Allocating %.1f MByte\n", 1e-6 * (12.0 * nnz));
-
-                /* Allocate memory for the matrix */
-
-                // liste des indices i
-                int *Mi = malloc(nnz * sizeof(*Mi));
-                // liste des indices j
-                int *Mj = malloc(nnz * sizeof(*Mj));
-
-                // liste des valeurs M[i,j]
-                u32 *Mx = malloc(nnz * sizeof(*Mx));
-
-                if (Mi == NULL || Mj == NULL || Mx == NULL)
-                        err(1, "Cannot allocate sparse matrix");
-
-                /* Parse and load actual entries */
-                double start = wtime();
-
-                for (long u = 0; u < nnz; u++)
+                // verbosity
+                if ((u & 0xffff) == 0xffff)
                 {
-                        int i, j;
-                        u32 x;
-                        if (3 != fscanf(f, "%d %d %d\n", &i, &j, &x))
-                                errx(1, "parse error entry %ld\n", u);
-                        Mi[u] = i - 1; /* MatrixMarket is 1-based */
-                        Mj[u] = j - 1;
-                        Mx[u] = x % prime;
-
-                        // verbosity
-                        if ((u & 0xffff) == 0xffff)
-                        {
-                                double elapsed = wtime() - start;
-                                double percent = (100. * u) / nnz;
-                                double rate = ftell(f) / 1048576. / elapsed;
-                                printf("\r  - Reading %s: %.1f%% (%.1f MB/s)", matrix_filename, percent, rate);
-                        }
-                }
-
-                /* finalization */
-                fclose(f);
-                printf("\n");
-
-                /***** PARTIE TRANSFERT DE DONNEES *****/
-
-                int bloc_size = (nnz / p);
-
-                // je keep les infos du processus 0s
-
-                M_processus->nrows = nrows;
-                M_processus->ncols = ncols;
-                M_processus->nnz = bloc_size;
-                M_processus->i = malloc(bloc_size * sizeof(*M_processus->i));
-                M_processus->j = malloc(bloc_size * sizeof(*M_processus->j));
-                M_processus->x = malloc(bloc_size * sizeof(*M_processus->x));
-
-                for (int u = 0; u < bloc_size; u++)
-                {
-                        M_processus->i[u] = Mi[u];
-                        M_processus->j[u] = Mj[u];
-                        M_processus->x[u] = Mx[u];
-                }
-
-                long int step, new_nnz;
-
-                // j'envoie le reste aux autres processus
-                for (int i = 1; i < p; i++)
-                {
-                        step = 0;
-                        // les lignes restantes sont données au dernier processus
-                        if (i == p - 1)
-                        {
-                                step = (nnz % p);
-                        }
-
-                        new_nnz = bloc_size + step;
-
-                        MPI_Send(&nrows, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&ncols, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&new_nnz, 1, MPI_LONG_INT, i, MSG_TAG, MPI_COMM_WORLD);
-
-                        MPI_Send(&Mi[i * bloc_size], new_nnz, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&Mj[i * bloc_size], new_nnz, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&Mx[i * bloc_size], new_nnz, MPI_UINT32_T, i, MSG_TAG, MPI_COMM_WORLD);
+                        double elapsed = wtime() - start;
+                        double percent = (100. * u) / nnz;
+                        double rate = ftell(f) / 1048576. / elapsed;
+                        printf("\r  - Reading %s: %.1f%% (%.1f MB/s)", matrix_filename, percent, rate);
                 }
         }
 
-        else
-        {
-
-                // les autres processus receptionnent leurs vals
-                MPI_Recv(&(M_processus->nrows), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus->ncols), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus->nnz), 1, MPI_LONG_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                // has to be allocated first
-                M_processus->i = malloc((M_processus->nnz) * sizeof(*M_processus->i));
-                M_processus->j = malloc((M_processus->nnz) * sizeof(*M_processus->j));
-                M_processus->x = malloc((M_processus->nnz) * sizeof(*M_processus->x));
-
-                MPI_Recv(M_processus->i, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus->j, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus->x, M_processus->nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
+        /* finalization */
+        fclose(f);
+        printf("\n");
+        M->nrows = nrows;
+        M->ncols = ncols;
+        M->nnz = nnz;
+        M->i = Mi;
+        M->j = Mj;
+        M->x = Mx;
 }
 
 /* y += M*x or y += transpose(M)*x, according to the transpose flag */
@@ -693,42 +624,30 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         /* allocate blocks of vectors */
 
-        // il check si on a une transposée et inverse les indices si oui
+        // this nrows = nrows of the vector v so the nb columns of matrix M
         int nrows = transpose ? M->ncols : M->nrows;
         int ncols = transpose ? M->nrows : M->ncols;
-
         long block_size = nrows * n;
-        // division entiere
         long Npad = ((nrows + n - 1) / n) * n;
-
         long block_size_pad = Npad * n;
-
         char human_size[8];
-
         human_format(human_size, 4 * sizeof(int) * block_size_pad);
-
         printf("  - Extra storage needed: %sB\n", human_size);
-
         u32 *v = malloc(sizeof(*v) * block_size_pad);
-
         u32 *tmp = malloc(sizeof(*tmp) * block_size_pad);
-
         u32 *Av = malloc(sizeof(*Av) * block_size_pad);
-
         u32 *p = malloc(sizeof(*p) * block_size_pad);
-
         if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
-
                 errx(1, "impossible d'allouer les blocs de vecteur");
+
+        fprintf(stderr, "v length %ld", block_size_pad);
+        fprintf(stderr, "M length %d", nrows);
 
         /* warn the user */
         expected_iterations = 1 + ncols / n;
-
         char human_its[8];
         human_format(human_its, expected_iterations);
         printf("  - Expecting %s iterations\n", human_its);
-
-        // more suited initialisation ?
 
         /* prepare initial values */
         for (long i = 0; i < block_size_pad; i++)
@@ -744,7 +663,6 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         /************* main loop *************/
         printf("  - Main loop\n");
-
         start = wtime();
         bool stop = false;
         while (true)
@@ -752,16 +670,22 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
-                // tmp = M * v ( equivalent en tTD de y = M x)
                 sparse_matrix_vector_product(tmp, M, v, !transpose);
-                // Av = M *tmp  (equivalent en td de z = Mtransposé *y)
+
                 sparse_matrix_vector_product(Av, M, tmp, transpose);
 
-                u32 vtAv[n * n];  // xt * z
-                u32 vtAAv[n * n]; // zt * z
-
-                // bloc bloc B  = vtAv A = vtAAv
+                u32 vtAv[n * n];
+                u32 vtAAv[n * n];
                 block_dot_products(vtAv, vtAAv, nrows, Av, v);
+
+                FILE *f = fopen("check.mtx", "w");
+
+                // for (long u = 0; u < block_size_pad; u++)
+                // {
+                //         fprintf(f, "%d \n", M->i[u]);
+                // }
+
+                fclose(f);
 
                 u32 winv[n * n];
                 u32 d[n];
@@ -789,7 +713,7 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         free(tmp);
         free(Av);
         free(p);
-        return v; // x
+        return v;
 }
 
 /**************************** dense vector block IO ************************/
@@ -809,59 +733,21 @@ void save_vector_block(char const *filename, int nrows, int ncols, u32 const *v)
         fclose(f);
 }
 
-void getSubMatrix(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int my_rank, int bloc_size)
-{
-
-        // je reecup le bloc de p0
-        // m not sure if i should give it the same val
-        M_processus->ncols = M.ncols;
-        M_processus->nrows = M.nrows;
-        M_processus->nnz = bloc_size;
-
-        M_processus->x = malloc(bloc_size * sizeof(*M_processus->x));
-        M_processus->i = malloc(bloc_size * sizeof(*M_processus->i));
-        M_processus->j = malloc(bloc_size * sizeof(*M_processus->j));
-
-        for (int i = my_rank * bloc_size; i < (my_rank + 1) * bloc_size; i++)
-        {
-                M_processus->x[i] = M.x[i];
-                M_processus->i[i] = M.i[i];
-                M_processus->j[i] = M.j[i];
-        }
-}
-
 /*************************** main function *********************************/
 
 int main(int argc, char **argv)
 {
-
-        /* init parallelisation */
-
-        int my_rank; /* rang du processeur actuel */
-        int p;       /* nombre de processeurs */
-
-        MPI_Init(&argc, &argv);
-        MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &p);
-
-        // command line options -> nothing to change
         process_command_line_options(argc, argv);
 
-        // loading the matrix
-        struct sparsematrix_t M_processus;
+        struct sparsematrix_t M;
+        sparsematrix_mm_load(&M, matrix_filename);
 
-        // processus 0 divise M en blocs qu'il donne a chaque processus
-        sparsematrix_mm_load(&M_processus, matrix_filename, my_rank, p);
+        u32 *kernel = block_lanczos(&M, n, right_kernel);
 
-        // // coeur du travail
-        // u32 *kernel = block_lanczos(&M, n, right_kernel);
-
-        // if (kernel_filename)
-        //         save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
-        // else
-        //         printf("Not saving result (no --output given)\n");
-        // free(kernel);
-
-        MPI_Finalize();
+        if (kernel_filename)
+                save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
+        else
+                printf("Not saving result (no --output given)\n");
+        free(kernel);
         exit(EXIT_SUCCESS);
 }

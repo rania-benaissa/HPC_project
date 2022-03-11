@@ -12,3 +12,16 @@
 
 //         fclose(f);
 // }
+
+char filename[80];
+
+sprintf(filename, "check%d.mtx", my_rank);
+
+FILE *f = fopen(filename, "w");
+
+for (long i = 0; i < block_size; i++)
+{
+    fprintf(f, "%d \n", v[i]);
+}
+
+fclose(f);
