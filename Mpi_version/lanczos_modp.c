@@ -281,35 +281,46 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
 
                 int bloc_size = (ncols / nb_processus);
 
+                int step;
+
                 // je keep les infos du processus 0s
 
                 M_processus->nrows = nrows;
                 M_processus->ncols = bloc_size;
 
-                int *nnz_procesus = malloc(nb_processus * sizeof(*nnz_procesus));
+                long int *nnz_processus = malloc(nb_processus * sizeof(*nnz_processus));
+                int *cols_processus = malloc(nb_processus * sizeof(*cols_processus));
 
                 int u = 0;
 
                 for (int i = 0; i < nb_processus; i++)
                 {
+                        // les lignes restantes sont données au dernier processus
+                        step = (i == nb_processus - 1) ? (ncols % nb_processus) : 0;
 
-                        nnz_procesus[i] = 0;
+                        nnz_processus[i] = 0;
 
-                        while (Mj[u] <= (i + 1) * bloc_size)
+                        cols_processus[i] = bloc_size + step;
+
+                        while (Mj[u] < (i + 1) * bloc_size + step && u < nnz)
                         {
-                                nnz_procesus[i]++;
+                                nnz_processus[i]++;
 
                                 u++;
                         }
+
+                        fprintf(stderr, "nb of nnz = %ld\n", nnz_processus[i]);
                 }
 
-                M_processus->i = malloc(nnz_procesus[0] * sizeof(*M_processus->i));
-                M_processus->j = malloc(nnz_procesus[0] * sizeof(*M_processus->j));
-                M_processus->x = malloc(nnz_procesus[0] * sizeof(*M_processus->x));
+                // remplissage du processus 0
+
+                M_processus->i = malloc(nnz_processus[0] * sizeof(*M_processus->i));
+                M_processus->j = malloc(nnz_processus[0] * sizeof(*M_processus->j));
+                M_processus->x = malloc(nnz_processus[0] * sizeof(*M_processus->x));
 
                 u = 0;
 
-                while (Mj[u] <= bloc_size)
+                while (Mj[u] < bloc_size)
                 {
                         M_processus->i[u] = Mi[u];
                         M_processus->j[u] = Mj[u];
@@ -318,40 +329,37 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
                         u++;
                 }
 
-                M_processus->nnz = nnz_procesus[0];
+                M_processus->nnz = nnz_processus[0];
 
-                long int step, new_cols;
+                // je cumule les nnz de chaque processus pour savoir ou les vals nnz commencent
+                long int cum_nnz_processus = nnz_processus[0];
 
-                // j'envoie le reste aux autres processus
+                //  j'envoie le reste aux autres processus
                 for (int i = 1; i < nb_processus; i++)
                 {
-                        step = 0;
-                        // les lignes restantes sont données au dernier processus
-                        if (i == nb_processus - 1)
+
+                        int *tempi = malloc(nnz_processus[i] * sizeof(*tempi));
+                        int *tempj = malloc(nnz_processus[i] * sizeof(*tempj));
+                        int *tempx = malloc(nnz_processus[i] * sizeof(*tempx));
+
+                        // ça c est faut faut que le temp recoive le bon truc
+                        for (int u = 0; u < nnz_processus[i]; u++)
                         {
-                                step = (ncols % nb_processus);
+                                tempi[u] = Mi[u + cum_nnz_processus];
+                                tempj[u] = Mj[u + cum_nnz_processus];
+                                tempx[u] = Mx[u + cum_nnz_processus];
                         }
 
-                        new_cols = bloc_size + step;
-
-                        int *tempi = malloc(nnz_procesus[i] * sizeof(*tempi));
-                        int *tempj = malloc(nnz_procesus[i] * sizeof(*tempj));
-                        int *tempx = malloc(nnz_procesus[i] * sizeof(*tempx));
-
-                        for (int u = 0; u < nnz_procesus[i]; u++)
-                        {
-                                tempi[u] = Mi[u];
-                                tempj[u] = Mj[u];
-                                tempx[u] = Mx[u];
-                        }
+                        cum_nnz_processus += nnz_processus[i];
 
                         MPI_Send(&nrows, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&new_cols, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&nnz_procesus[i], 1, MPI_LONG_INT, i, MSG_TAG, MPI_COMM_WORLD);
+                        MPI_Send(&cols_processus[i], 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
 
-                        MPI_Send(tempi, nnz_procesus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        // MPI_Send(tempj, nnz_procesus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        // MPI_Send(tempx, nnz_procesus[i], MPI_UINT32_T, i, MSG_TAG, MPI_COMM_WORLD);
+                        MPI_Send(&nnz_processus[i], 1, MPI_LONG_INT, i, MSG_TAG, MPI_COMM_WORLD);
+
+                        MPI_Send(tempi, nnz_processus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
+                        MPI_Send(tempj, nnz_processus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
+                        MPI_Send(tempx, nnz_processus[i], MPI_UINT32_T, i, MSG_TAG, MPI_COMM_WORLD);
                 }
         }
 
@@ -363,15 +371,29 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
                 MPI_Recv(&(M_processus->ncols), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(&(M_processus->nnz), 1, MPI_LONG_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                // // has to be allocated first
+                // fprintf(stderr, "nb of nnz = %ld\n", M_processus->nnz);
+                //  // has to be allocated first
                 M_processus->i = malloc((M_processus->nnz) * sizeof(*M_processus->i));
                 M_processus->j = malloc((M_processus->nnz) * sizeof(*M_processus->j));
                 M_processus->x = malloc((M_processus->nnz) * sizeof(*M_processus->x));
 
                 MPI_Recv(M_processus->i, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                // MPI_Recv(M_processus->j, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                // MPI_Recv(M_processus->x, M_processus->nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M_processus->j, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M_processus->x, M_processus->nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
+
+        // if u wanna verify it
+
+        // FILE *f = fopen("check.mtx", "a+");
+
+        // fprintf(f, "-- processus %d --\n", my_rank);
+
+        // for (long u = 0; u < M_processus->nnz; u++)
+        // {
+        //         fprintf(f, "%d \n", M_processus->x[u]);
+        // }
+
+        // fclose(f);
 }
 
 /* y += M*x or y += transpose(M)*x, according to the transpose flag */

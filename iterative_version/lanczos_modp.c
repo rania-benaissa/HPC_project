@@ -680,10 +680,10 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
                 FILE *f = fopen("check.mtx", "w");
 
-                // for (long u = 0; u < block_size_pad; u++)
-                // {
-                //         fprintf(f, "%d \n", M->i[u]);
-                // }
+                for (long u = 0; u < block_size_pad; u++)
+                {
+                        fprintf(f, "%d \n", M->x[u]);
+                }
 
                 fclose(f);
 
