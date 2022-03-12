@@ -662,49 +662,49 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 v[i] = random64() % prime;
 
         /************* main loop *************/
-        printf("  - Main loop\n");
-        start = wtime();
-        bool stop = false;
-        while (true)
+        // printf("  - Main loop\n");
+        // start = wtime();
+        // bool stop = false;
+        // while (true)
+        // {
+        // if (stop_after > 0 && n_iterations == stop_after)
+        //         break;
+
+        sparse_matrix_vector_product(tmp, M, v, !transpose);
+
+        sparse_matrix_vector_product(Av, M, tmp, transpose);
+
+        u32 vtAv[n * n];
+        u32 vtAAv[n * n];
+        block_dot_products(vtAv, vtAAv, nrows, Av, v);
+
+        FILE *f = fopen("check.mtx", "w");
+
+        for (long u = 0; u < M->nnz; u++)
         {
-                if (stop_after > 0 && n_iterations == stop_after)
-                        break;
-
-                sparse_matrix_vector_product(tmp, M, v, !transpose);
-
-                sparse_matrix_vector_product(Av, M, tmp, transpose);
-
-                u32 vtAv[n * n];
-                u32 vtAAv[n * n];
-                block_dot_products(vtAv, vtAAv, nrows, Av, v);
-
-                FILE *f = fopen("check.mtx", "w");
-
-                for (long u = 0; u < block_size_pad; u++)
-                {
-                        fprintf(f, "%d \n", M->x[u]);
-                }
-
-                fclose(f);
-
-                u32 winv[n * n];
-                u32 d[n];
-                stop = (semi_inverse(vtAv, winv, d) == 0);
-
-                /* check that everything is working ; disable in production */
-                correctness_tests(vtAv, vtAAv, winv, d);
-
-                if (stop)
-                        break;
-
-                orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
-
-                /* the next value of v is in tmp ; copy */
-                for (long i = 0; i < block_size; i++)
-                        v[i] = tmp[i];
-
-                verbosity();
+                fprintf(f, "%d \n", M->x[u]);
         }
+
+        fclose(f);
+
+        // u32 winv[n * n];
+        // u32 d[n];
+        // stop = (semi_inverse(vtAv, winv, d) == 0);
+
+        // /* check that everything is working ; disable in production */
+        // correctness_tests(vtAv, vtAAv, winv, d);
+
+        // if (stop)
+        //         break;
+
+        // orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
+
+        // /* the next value of v is in tmp ; copy */
+        // for (long i = 0; i < block_size; i++)
+        //         v[i] = tmp[i];
+
+        // verbosity();
+        //}
         printf("\n");
 
         if (stop_after < 0)

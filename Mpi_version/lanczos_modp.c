@@ -203,89 +203,102 @@ void process_command_line_options(int argc, char **argv)
 /****************** sparse matrix operations ******************/
 
 /* Load a matrix from a file in "list of triplet" representation */
-void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filename, int my_rank, int nb_processus)
+void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
+{
+
+        int nrows = 0;
+        int ncols = 0;
+        long nnz = 0;
+
+        printf("Loading matrix from %s\n", filename);
+        fflush(stdout);
+
+        FILE *f = fopen(filename, "r");
+
+        if (f == NULL)
+                err(1, "impossible d'ouvrir %s", filename);
+
+        /* read the header, check format */
+        MM_typecode matcode;
+        if (mm_read_banner(f, &matcode) != 0)
+                errx(1, "Could not process Matrix Market banner.\n");
+        if (!mm_is_matrix(matcode) || !mm_is_sparse(matcode))
+                errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)",
+                     mm_typecode_to_str(matcode));
+        if (!mm_is_general(matcode) || !mm_is_integer(matcode))
+                errx(1, "Matrix type [%s] not supported (only integer general are OK)",
+                     mm_typecode_to_str(matcode));
+        if (mm_read_mtx_crd_size(f, &nrows, &ncols, &nnz) != 0)
+                errx(1, "Cannot read matrix size");
+
+        fprintf(stderr, "  - [%s] %d x %d with %ld nz\n", mm_typecode_to_str(matcode), nrows, ncols, nnz);
+        fprintf(stderr, "  - Allocating %.1f MByte\n", 1e-6 * (12.0 * nnz));
+
+        /* Allocate memory for the matrix */
+
+        // liste des indices i
+        int *Mi = malloc(nnz * sizeof(*Mi));
+        // liste des indices j
+        int *Mj = malloc(nnz * sizeof(*Mj));
+
+        // liste des valeurs M[i,j]
+        u32 *Mx = malloc(nnz * sizeof(*Mx));
+
+        if (Mi == NULL || Mj == NULL || Mx == NULL)
+                err(1, "Cannot allocate sparse matrix");
+
+        /* Parse and load actual entries */
+        double start = wtime();
+
+        for (long u = 0; u < nnz; u++)
+        {
+                int i, j;
+                u32 x;
+                if (3 != fscanf(f, "%d %d %d\n", &i, &j, &x))
+                        errx(1, "parse error entry %ld\n", u);
+                Mi[u] = i - 1; /* MatrixMarket is 1-based */
+                Mj[u] = j - 1;
+                Mx[u] = x % prime;
+
+                // verbosity
+                if ((u & 0xffff) == 0xffff)
+                {
+                        double elapsed = wtime() - start;
+                        double percent = (100. * u) / nnz;
+                        double rate = ftell(f) / 1048576. / elapsed;
+                        printf("\r  - Reading %s: %.1f%% (%.1f MB/s)", matrix_filename, percent, rate);
+                }
+        }
+
+        /* finalization */
+        fclose(f);
+        printf("\n");
+
+        M->nrows = nrows;
+        M->ncols = ncols;
+        M->nnz = nnz;
+        M->i = Mi;
+        M->j = Mj;
+        M->x = Mx;
+}
+
+// subdivise M par colonnes
+void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int nb_processus, int my_rank)
 {
         int MSG_TAG = 10;
 
         if (my_rank == 0)
         {
-                int nrows = 0;
-                int ncols = 0;
-                long nnz = 0;
-
-                printf("Loading matrix from %s\n", filename);
-                fflush(stdout);
-
-                FILE *f = fopen(filename, "r");
-
-                if (f == NULL)
-                        err(1, "impossible d'ouvrir %s", filename);
-
-                /* read the header, check format */
-                MM_typecode matcode;
-                if (mm_read_banner(f, &matcode) != 0)
-                        errx(1, "Could not process Matrix Market banner.\n");
-                if (!mm_is_matrix(matcode) || !mm_is_sparse(matcode))
-                        errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)",
-                             mm_typecode_to_str(matcode));
-                if (!mm_is_general(matcode) || !mm_is_integer(matcode))
-                        errx(1, "Matrix type [%s] not supported (only integer general are OK)",
-                             mm_typecode_to_str(matcode));
-                if (mm_read_mtx_crd_size(f, &nrows, &ncols, &nnz) != 0)
-                        errx(1, "Cannot read matrix size");
-
-                fprintf(stderr, "  - [%s] %d x %d with %ld nz\n", mm_typecode_to_str(matcode), nrows, ncols, nnz);
-                fprintf(stderr, "  - Allocating %.1f MByte\n", 1e-6 * (12.0 * nnz));
-
-                /* Allocate memory for the matrix */
-
-                // liste des indices i
-                int *Mi = malloc(nnz * sizeof(*Mi));
-                // liste des indices j
-                int *Mj = malloc(nnz * sizeof(*Mj));
-
-                // liste des valeurs M[i,j]
-                u32 *Mx = malloc(nnz * sizeof(*Mx));
-
-                if (Mi == NULL || Mj == NULL || Mx == NULL)
-                        err(1, "Cannot allocate sparse matrix");
-
-                /* Parse and load actual entries */
-                double start = wtime();
-
-                for (long u = 0; u < nnz; u++)
-                {
-                        int i, j;
-                        u32 x;
-                        if (3 != fscanf(f, "%d %d %d\n", &i, &j, &x))
-                                errx(1, "parse error entry %ld\n", u);
-                        Mi[u] = i - 1; /* MatrixMarket is 1-based */
-                        Mj[u] = j - 1;
-                        Mx[u] = x % prime;
-
-                        // verbosity
-                        if ((u & 0xffff) == 0xffff)
-                        {
-                                double elapsed = wtime() - start;
-                                double percent = (100. * u) / nnz;
-                                double rate = ftell(f) / 1048576. / elapsed;
-                                printf("\r  - Reading %s: %.1f%% (%.1f MB/s)", matrix_filename, percent, rate);
-                        }
-                }
-
-                /* finalization */
-                fclose(f);
-                printf("\n");
 
                 /***** PARTIE TRANSFERT DE DONNEES *****/
 
-                int bloc_size = (ncols / nb_processus);
+                int bloc_size = (M.ncols / nb_processus);
 
                 int step;
 
                 // je keep les infos du processus 0s
 
-                M_processus->nrows = nrows;
+                M_processus->nrows = M.nrows;
                 M_processus->ncols = bloc_size;
 
                 long int *nnz_processus = malloc(nb_processus * sizeof(*nnz_processus));
@@ -296,13 +309,13 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
                 for (int i = 0; i < nb_processus; i++)
                 {
                         // les lignes restantes sont données au dernier processus
-                        step = (i == nb_processus - 1) ? (ncols % nb_processus) : 0;
+                        step = (i == nb_processus - 1) ? (M.ncols % nb_processus) : 0;
 
                         nnz_processus[i] = 0;
 
                         cols_processus[i] = bloc_size + step;
 
-                        while (Mj[u] < (i + 1) * bloc_size + step && u < nnz)
+                        while (M.j[u] < (i + 1) * bloc_size + step && u < M.nnz)
                         {
                                 nnz_processus[i]++;
 
@@ -320,11 +333,11 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
 
                 u = 0;
 
-                while (Mj[u] < bloc_size)
+                while (M.j[u] < bloc_size)
                 {
-                        M_processus->i[u] = Mi[u];
-                        M_processus->j[u] = Mj[u];
-                        M_processus->x[u] = Mx[u];
+                        M_processus->i[u] = M.i[u];
+                        M_processus->j[u] = M.j[u];
+                        M_processus->x[u] = M.x[u];
 
                         u++;
                 }
@@ -345,14 +358,14 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
                         // ça c est faut faut que le temp recoive le bon truc
                         for (int u = 0; u < nnz_processus[i]; u++)
                         {
-                                tempi[u] = Mi[u + cum_nnz_processus];
-                                tempj[u] = Mj[u + cum_nnz_processus];
-                                tempx[u] = Mx[u + cum_nnz_processus];
+                                tempi[u] = M.i[u + cum_nnz_processus];
+                                tempj[u] = M.j[u + cum_nnz_processus];
+                                tempx[u] = M.x[u + cum_nnz_processus];
                         }
 
                         cum_nnz_processus += nnz_processus[i];
 
-                        MPI_Send(&nrows, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
+                        MPI_Send(&M.nrows, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
                         MPI_Send(&cols_processus[i], 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
 
                         MPI_Send(&nnz_processus[i], 1, MPI_LONG_INT, i, MSG_TAG, MPI_COMM_WORLD);
@@ -362,7 +375,6 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
                         MPI_Send(tempx, nnz_processus[i], MPI_UINT32_T, i, MSG_TAG, MPI_COMM_WORLD);
                 }
         }
-
         else
         {
 
@@ -394,6 +406,10 @@ void sparsematrix_mm_load(struct sparsematrix_t *M_processus, char const *filena
         // }
 
         // fclose(f);
+}
+
+void subdiviseV()
+{
 }
 
 /* y += M*x or y += transpose(M)*x, according to the transpose flag */
@@ -742,8 +758,9 @@ void final_check(int nrows, int ncols, u32 const *v, u32 const *vtM)
 }
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
-u32 *block_lanczos(struct sparsematrix_t const *M_processus, int n, bool transpose, int my_rank, int nb_processus)
+u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_rank, int nb_processus)
 {
+
         printf("Block Lanczos\n");
 
         printf("%d", nb_processus);
@@ -753,8 +770,8 @@ u32 *block_lanczos(struct sparsematrix_t const *M_processus, int n, bool transpo
         /* allocate blocks of vectors */
 
         // il check si on a une transposée et inverse les indices si oui
-        int nrows = transpose ? M_processus->ncols : M_processus->nrows;
-        int ncols = transpose ? M_processus->nrows : M_processus->ncols;
+        int nrows = transpose ? M.ncols : M.nrows;
+        int ncols = transpose ? M.nrows : M.ncols;
 
         // the bloc size should
 
@@ -811,6 +828,13 @@ u32 *block_lanczos(struct sparsematrix_t const *M_processus, int n, bool transpo
         /************* main loop *************/
         printf("  - Main loop\n");
 
+        struct sparsematrix_t M_processus;
+
+        // je subdivise M first
+        subdiviseM(M, &M_processus, nb_processus, my_rank);
+
+        fprintf(stderr, " v size %ld\n", block_size_pad);
+
         // start = wtime();
         //  bool stop = false;
 
@@ -821,29 +845,16 @@ u32 *block_lanczos(struct sparsematrix_t const *M_processus, int n, bool transpo
         //         break;
 
         // tmp = M * v ( equivalent en tTD de y = M x)
-        sparse_matrix_vector_product(tmp, M_processus, v, !transpose);
+        // sparse_matrix_vector_product(tmp, M_processus, v, !transpose);
 
         // Av = M *tmp  (equivalent en td de z = Mtransposé *y)
-        sparse_matrix_vector_product(Av, M_processus, tmp, transpose);
+        // sparse_matrix_vector_product(Av, M_processus, tmp, transpose);
 
-        u32 vtAv[n * n];  // xt * z
-        u32 vtAAv[n * n]; // zt * z
+        // u32 vtAv[n * n];  // xt * z
+        // u32 vtAAv[n * n]; // zt * z
 
         // bloc bloc B  = vt*Av = xt * z / A = vt*A*Av
-        block_dot_products(vtAv, vtAAv, nrows, Av, v);
-
-        if (my_rank == 0)
-        {
-
-                FILE *f = fopen("check.mtx", "w");
-
-                for (long u = 0; u < n * n; u++)
-                {
-                        fprintf(f, "%d \n", vtAv[u]);
-                }
-
-                fclose(f);
-        }
+        // block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
         // u32 winv[n * n];
         // u32 d[n];
@@ -935,13 +946,17 @@ int main(int argc, char **argv)
         process_command_line_options(argc, argv);
 
         // loading the matrix
-        struct sparsematrix_t M_processus;
+        struct sparsematrix_t M;
 
-        // processus 0 divise M en blocs qu'il donne a chaque processus
-        sparsematrix_mm_load(&M_processus, matrix_filename, my_rank, nb_processus);
+        // processus 0 reecupere la matrice M
+
+        if (my_rank == 0)
+                sparsematrix_mm_load(&M, matrix_filename);
 
         // // coeur du travail
-        /*u32 *kernel = */ // block_lanczos(&M_processus, n, right_kernel, my_rank, nb_processus);
+        /*u32 *kernel = */
+
+        block_lanczos(M, n, right_kernel, my_rank, nb_processus);
 
         // if (kernel_filename)
         //         save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
