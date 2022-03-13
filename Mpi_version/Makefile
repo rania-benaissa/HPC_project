@@ -1,7 +1,6 @@
 # added pour compiler avec MPI
 CC = mpicc
-CFLAGS = -std=c99 -g -Wall -Wextra -Werror -O3 -march=native -I. -pg
-LDFLAGS = -pg
+CFLAGS = -std=c99 -g -Wall -Wextra -Werror -O3 -march=native -I. -pg 
 
 # Uncomment these for OpenMP
 #CFLAGS += -fopenmp

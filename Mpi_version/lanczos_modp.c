@@ -283,8 +283,11 @@ void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
 }
 
 // subdivise M par colonnes
-void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int nb_processus, int my_rank)
+struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int my_rank)
 {
+
+        struct sparsematrix_t M_processus;
+
         int MSG_TAG = 10;
 
         if (my_rank == 0)
@@ -298,8 +301,8 @@ void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int
 
                 // je keep les infos du processus 0s
 
-                M_processus->nrows = M.nrows;
-                M_processus->ncols = bloc_size;
+                M_processus.nrows = M.nrows;
+                M_processus.ncols = bloc_size;
 
                 long int *nnz_processus = malloc(nb_processus * sizeof(*nnz_processus));
                 int *cols_processus = malloc(nb_processus * sizeof(*cols_processus));
@@ -327,22 +330,22 @@ void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int
 
                 // remplissage du processus 0
 
-                M_processus->i = malloc(nnz_processus[0] * sizeof(*M_processus->i));
-                M_processus->j = malloc(nnz_processus[0] * sizeof(*M_processus->j));
-                M_processus->x = malloc(nnz_processus[0] * sizeof(*M_processus->x));
+                M_processus.i = malloc(nnz_processus[0] * sizeof(*M_processus.i));
+                M_processus.j = malloc(nnz_processus[0] * sizeof(*M_processus.j));
+                M_processus.x = malloc(nnz_processus[0] * sizeof(*M_processus.x));
 
                 u = 0;
 
                 while (M.j[u] < bloc_size)
                 {
-                        M_processus->i[u] = M.i[u];
-                        M_processus->j[u] = M.j[u];
-                        M_processus->x[u] = M.x[u];
+                        M_processus.i[u] = M.i[u];
+                        M_processus.j[u] = M.j[u];
+                        M_processus.x[u] = M.x[u];
 
                         u++;
                 }
 
-                M_processus->nnz = nnz_processus[0];
+                M_processus.nnz = nnz_processus[0];
 
                 // je cumule les nnz de chaque processus pour savoir ou les vals nnz commencent
                 long int cum_nnz_processus = nnz_processus[0];
@@ -379,19 +382,19 @@ void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int
         {
 
                 // les autres processus receptionnent leurs vals
-                MPI_Recv(&(M_processus->nrows), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus->ncols), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus->nnz), 1, MPI_LONG_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&(M_processus.nrows), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&(M_processus.ncols), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&(M_processus.nnz), 1, MPI_LONG_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
                 // fprintf(stderr, "nb of nnz = %ld\n", M_processus->nnz);
                 //  // has to be allocated first
-                M_processus->i = malloc((M_processus->nnz) * sizeof(*M_processus->i));
-                M_processus->j = malloc((M_processus->nnz) * sizeof(*M_processus->j));
-                M_processus->x = malloc((M_processus->nnz) * sizeof(*M_processus->x));
+                M_processus.i = malloc((M_processus.nnz) * sizeof(*M_processus.i));
+                M_processus.j = malloc((M_processus.nnz) * sizeof(*M_processus.j));
+                M_processus.x = malloc((M_processus.nnz) * sizeof(*M_processus.x));
 
-                MPI_Recv(M_processus->i, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus->j, M_processus->nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus->x, M_processus->nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M_processus.i, M_processus.nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M_processus.j, M_processus.nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(M_processus.x, M_processus.nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
         // if u wanna verify it
@@ -406,10 +409,104 @@ void subdiviseM(struct sparsematrix_t M, struct sparsematrix_t *M_processus, int
         // }
 
         // fclose(f);
+
+        return M_processus;
 }
 
-void subdiviseV()
+// cree le vecteur V
+u32 *createV(int block_size, int block_size_pad)
 {
+
+        char human_size[8];
+
+        human_format(human_size, 4 * sizeof(int) * block_size_pad);
+
+        printf("  - Extra storage needed: %sB\n", human_size);
+
+        u32 *v = malloc(sizeof(*v) * block_size_pad);
+
+        if (v == NULL)
+
+                errx(1, "impossible d'allouer les blocs de vecteur");
+
+        // more suited initialisation ?
+
+        /* prepare initial values */
+        for (long i = 0; i < block_size_pad; i++)
+        {
+                v[i] = 0;
+        }
+
+        // v a la meme valeur pour chaque processus ! no need for transfering or anything
+        for (long i = 0; i < block_size; i++)
+                v[i] = random64() % prime;
+
+        return v;
+}
+
+// subdivise le vecteur v
+u32 *subdiviseV(int nrows, int ncols, int n, int ncols_processus, int nb_processus, int my_rank)
+{
+
+        u32 *v_processus;
+        int MSG_TAG = 10;
+
+        if (my_rank == 0)
+        {
+
+                // the bloc size should
+
+                long block_size = nrows * n;
+                // division entiere
+                long Npad = ((nrows + n - 1) / n) * n;
+
+                // ça c est la taille de mon v
+                long block_size_pad = Npad * n;
+                // partie creation
+                u32 *v = createV(block_size, block_size_pad);
+
+                // le processus 0 garde son vecteur v
+
+                v_processus = malloc(sizeof(*v_processus) * (n * ncols_processus));
+
+                // partie subdivision
+
+                for (int i = 0; i < n; i++)
+                {
+                        for (int u = 0; u < ncols_processus; u++)
+                        {
+                                v_processus[(i * ncols_processus) + u] = v[(i * ncols) + (my_rank * ncols_processus) + u];
+                        }
+                }
+                int step;
+
+                // j envoie le reste aux autres processus
+                for (int proc = 1; proc < nb_processus; proc++)
+                {
+                        step = (proc == nb_processus - 1) ? (ncols % nb_processus) : 0;
+                        u32 *temp_v = malloc(sizeof(*temp_v) * (n * (ncols_processus + step)));
+
+                        // je remplis v
+                        for (int i = 0; i < n; i++)
+                        {
+                                for (int u = 0; u < ncols_processus + step; u++)
+                                {
+                                        temp_v[(i * ncols_processus) + u] = v[(i * ncols) + (proc * ncols_processus) + u];
+                                }
+                        }
+
+                        MPI_Send(temp_v, n * (ncols_processus + step), MPI_INT, proc, MSG_TAG, MPI_COMM_WORLD);
+                }
+        }
+
+        else
+        {
+                v_processus = malloc(sizeof(*v_processus) * (n * ncols_processus));
+
+                MPI_Recv(v_processus, ncols_processus * n, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        return v_processus;
 }
 
 /* y += M*x or y += transpose(M)*x, according to the transpose flag */
@@ -417,9 +514,12 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
 {
         long nnz = M->nnz;
         int nrows = transpose ? M->ncols : M->nrows;
+
         int const *Mi = M->i;
         int const *Mj = M->j;
         u32 const *Mx = M->x;
+
+        fprintf(stderr, "taille initialisée = %ld\n", nrows * n);
 
         for (long i = 0; i < nrows * n; i++)
 
@@ -758,82 +858,86 @@ void final_check(int nrows, int ncols, u32 const *v, u32 const *vtM)
 }
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
-u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_rank, int nb_processus)
+void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_rank, int nb_processus)
 {
 
         printf("Block Lanczos\n");
-
-        printf("%d", nb_processus);
 
         /************* preparations **************/
 
         /* allocate blocks of vectors */
 
-        // il check si on a une transposée et inverse les indices si oui
+        // on garde ça in the main thing
         int nrows = transpose ? M.ncols : M.nrows;
         int ncols = transpose ? M.nrows : M.ncols;
 
         // the bloc size should
 
-        long block_size = nrows * n;
-        // division entiere
-        long Npad = ((nrows + n - 1) / n) * n;
+        // long block_size = nrows * n;
+        //  division entiere
+        // long Npad = ((nrows + n - 1) / n) * n;
 
-        long block_size_pad = Npad * n;
+        // long block_size_pad = Npad * n;
 
-        char human_size[8];
+        // char human_size[8];
 
-        human_format(human_size, 4 * sizeof(int) * block_size_pad);
+        // human_format(human_size, 4 * sizeof(int) * block_size_pad);
 
-        printf("  - Extra storage needed: %sB\n", human_size);
+        // printf("  - Extra storage needed: %sB\n", human_size);
 
-        u32 *v = malloc(sizeof(*v) * block_size_pad);
+        // u32 *v = malloc(sizeof(*v) * block_size_pad);
 
-        u32 *tmp = malloc(sizeof(*tmp) * block_size_pad);
+        // u32 *tmp = malloc(sizeof(*tmp) * block_size_pad);
 
-        u32 *Av = malloc(sizeof(*Av) * block_size_pad);
+        // u32 *Av = malloc(sizeof(*Av) * block_size_pad);
 
-        u32 *p = malloc(sizeof(*p) * block_size_pad);
+        // u32 *p = malloc(sizeof(*p) * block_size_pad);
 
-        if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
+        // if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
 
-                errx(1, "impossible d'allouer les blocs de vecteur");
+        //         errx(1, "impossible d'allouer les blocs de vecteur");
 
-        // bla bla to avoid repeating
-        if (my_rank == 0)
-        {
-                /* warn the user */
-                expected_iterations = 1 + ncols / n;
+        // // bla bla to avoid repeating
+        // if (my_rank == 0)
+        // {
+        //         /* warn the user */
+        //         expected_iterations = 1 + ncols / n;
 
-                char human_its[8];
-                human_format(human_its, expected_iterations);
-                printf("  - Expecting %s iterations\n", human_its);
-        }
+        //         char human_its[8];
+        //         human_format(human_its, expected_iterations);
+        //         printf("  - Expecting %s iterations\n", human_its);
+        // }
 
-        // more suited initialisation ?
+        // // more suited initialisation ?
 
-        /* prepare initial values */
-        for (long i = 0; i < block_size_pad; i++)
-        {
-                Av[i] = 0;
-                v[i] = 0;
-                p[i] = 0;
-                tmp[i] = 0;
-        }
+        // /* prepare initial values */
+        // for (long i = 0; i < block_size_pad; i++)
+        // {
+        //         Av[i] = 0;
+        //         v[i] = 0;
+        //         p[i] = 0;
+        //         tmp[i] = 0;
+        // }
 
-        // v a la meme valeur pour chaque processus ! no need for transfering or anything
-        for (long i = 0; i < block_size; i++)
-                v[i] = random64() % prime;
+        // // v a la meme valeur pour chaque processus ! no need for transfering or anything
+        // for (long i = 0; i < block_size; i++)
+        //         v[i] = random64() % prime;
 
         /************* main loop *************/
         printf("  - Main loop\n");
 
-        struct sparsematrix_t M_processus;
-
         // je subdivise M first
-        subdiviseM(M, &M_processus, nb_processus, my_rank);
+        struct sparsematrix_t M_processus = subdiviseM(M, nb_processus, my_rank);
 
-        fprintf(stderr, " v size %ld\n", block_size_pad);
+        // si c est la matrice transposée
+        int nrows_processus = transpose ? M_processus.ncols : M_processus.nrows;
+        int ncols_processus = transpose ? M_processus.nrows : M_processus.ncols;
+
+        // cols and rows are inverted because we have !transpose later in product
+        u32 *v_processus = subdiviseV(ncols, nrows, n, nrows_processus, nb_processus, my_rank);
+
+        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * ncols_processus));
+        u32 *Av_processus = malloc(sizeof(*Av_processus) * (n * nrows_processus));
 
         // start = wtime();
         //  bool stop = false;
@@ -844,11 +948,27 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         // if (stop_after > 0 && n_iterations == stop_after)
         //         break;
 
-        // tmp = M * v ( equivalent en tTD de y = M x)
-        // sparse_matrix_vector_product(tmp, M_processus, v, !transpose);
+        /*tmp = M * v(equivalent en tTD de y = M x)*/
+        sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
 
-        // Av = M *tmp  (equivalent en td de z = Mtransposé *y)
-        // sparse_matrix_vector_product(Av, M_processus, tmp, transpose);
+        u32 *tmp_processus1 = malloc(sizeof(*tmp_processus1) * (n * ncols_processus));
+        MPI_Reduce(tmp_processus, tmp_processus1, n * ncols_processus, MPI_INT32_T, MPI_SUM, 0, MPI_COMM_WORLD);
+        // u32 *tmp_processus1 = malloc(sizeof(*tmp_processus1) * (n * ncols_processus));
+        //  MPI_Reduce_scatter_block(tmp_processus, tmp_processus1, (n * ncols_processus), MPI_UINT32_T, MPI_SUM, MPI_COMM_WORLD);
+
+        /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
+        // sparse_matrix_vector_product(Av_processus, &M_processus, tmp_processus, transpose);
+        if (my_rank == 0)
+        {
+                FILE *f = fopen("check.mtx", "a+");
+
+                for (int u = 0; u < n * ncols_processus; u++)
+                {
+                        fprintf(f, "%d\n", tmp_processus1[u]);
+                }
+
+                fclose(f);
+        }
 
         // u32 vtAv[n * n];  // xt * z
         // u32 vtAAv[n * n]; // zt * z
@@ -875,18 +995,18 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         // verbosity();
         //}
 
-        if (my_rank == 0)
-        {
-                printf("\n");
+        // if (my_rank == 0)
+        // {
+        //         printf("\n");
 
-                if (stop_after < 0)
-                        final_check(nrows, ncols, v, tmp);
-                printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-                free(tmp);
-                free(Av);
-                free(p);
-        }
-        return v; // x
+        //         if (stop_after < 0)
+        //                 final_check(nrows, ncols, v, tmp);
+        //         printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
+        //         free(tmp);
+        //         free(Av);
+        //         free(p);
+        // }
+        // return v; // x
 }
 
 /**************************** dense vector block IO ************************/

@@ -276,6 +276,8 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
 {
         long nnz = M->nnz;
         int nrows = transpose ? M->ncols : M->nrows;
+
+        fprintf(stderr, "nrows = %d", nrows);
         int const *Mi = M->i;
         int const *Mj = M->j;
         u32 const *Mx = M->x;
@@ -627,6 +629,9 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         // this nrows = nrows of the vector v so the nb columns of matrix M
         int nrows = transpose ? M->ncols : M->nrows;
         int ncols = transpose ? M->nrows : M->ncols;
+
+        fprintf(stderr, "nrows = %d\n", nrows);
+
         long block_size = nrows * n;
         long Npad = ((nrows + n - 1) / n) * n;
         long block_size_pad = Npad * n;
@@ -640,8 +645,7 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
                 errx(1, "impossible d'allouer les blocs de vecteur");
 
-        fprintf(stderr, "v length %ld", block_size_pad);
-        fprintf(stderr, "M length %d", nrows);
+        fprintf(stderr, "tmp length %ld", block_size_pad);
 
         /* warn the user */
         expected_iterations = 1 + ncols / n;
@@ -670,6 +674,8 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         // if (stop_after > 0 && n_iterations == stop_after)
         //         break;
 
+        fprintf(stderr, "MULT btw temp(%ld) = M(%d * %d) * V (%ld)\n", block_size_pad, nrows, ncols, block_size_pad);
+
         sparse_matrix_vector_product(tmp, M, v, !transpose);
 
         sparse_matrix_vector_product(Av, M, tmp, transpose);
@@ -680,9 +686,9 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         FILE *f = fopen("check.mtx", "w");
 
-        for (long u = 0; u < M->nnz; u++)
+        for (long u = 0; u < block_size_pad; u++)
         {
-                fprintf(f, "%d \n", M->x[u]);
+                fprintf(f, "%d \n", v[u]);
         }
 
         fclose(f);
