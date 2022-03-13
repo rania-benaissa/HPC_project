@@ -358,11 +358,11 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                         int *tempj = malloc(nnz_processus[i] * sizeof(*tempj));
                         int *tempx = malloc(nnz_processus[i] * sizeof(*tempx));
 
-                        // ça c est faut faut que le temp recoive le bon truc
+                        // ça faut que le temp recoive le bon truc
                         for (int u = 0; u < nnz_processus[i]; u++)
                         {
                                 tempi[u] = M.i[u + cum_nnz_processus];
-                                tempj[u] = M.j[u + cum_nnz_processus];
+                                tempj[u] = M.j[u + cum_nnz_processus] % cols_processus[i];
                                 tempx[u] = M.x[u + cum_nnz_processus];
                         }
 
@@ -519,16 +519,18 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
         int const *Mj = M->j;
         u32 const *Mx = M->x;
 
-        fprintf(stderr, "taille initialisée = %ld\n", nrows * n);
-
         for (long i = 0; i < nrows * n; i++)
 
+                y[i] = 0;
+
+        for (long i = 0; i < nrows * n; i++)
                 y[i] = 0;
 
         for (long k = 0; k < nnz; k++)
         {
                 int i = transpose ? Mj[k] : Mi[k];
                 int j = transpose ? Mi[k] : Mj[k];
+
                 u64 v = Mx[k];
                 for (int l = 0; l < n; l++)
                 {
@@ -960,6 +962,7 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         // sparse_matrix_vector_product(Av_processus, &M_processus, tmp_processus, transpose);
         if (my_rank == 0)
         {
+
                 FILE *f = fopen("check.mtx", "a+");
 
                 for (int u = 0; u < n * ncols_processus; u++)
@@ -968,6 +971,15 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
                 }
 
                 fclose(f);
+
+                // FILE *f = fopen("check.mtx", "a+");
+
+                // for (int u = 0; u < M_processus.nnz; u++)
+                // {
+                //         fprintf(f, "%d %d %d\n", M_processus.i[u], M_processus.j[u], M_processus.x[u]);
+                // }
+
+                // fclose(f);
         }
 
         // u32 vtAv[n * n];  // xt * z

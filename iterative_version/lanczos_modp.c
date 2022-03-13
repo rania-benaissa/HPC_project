@@ -678,20 +678,20 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         sparse_matrix_vector_product(tmp, M, v, !transpose);
 
+        FILE *f = fopen("check.mtx", "w");
+
+        for (long u = 0; u < block_size_pad; u++)
+        {
+                fprintf(f, "%d \n", tmp[u]);
+        }
+
+        fclose(f);
+
         sparse_matrix_vector_product(Av, M, tmp, transpose);
 
         u32 vtAv[n * n];
         u32 vtAAv[n * n];
         block_dot_products(vtAv, vtAAv, nrows, Av, v);
-
-        FILE *f = fopen("check.mtx", "w");
-
-        for (long u = 0; u < block_size_pad; u++)
-        {
-                fprintf(f, "%d \n", v[u]);
-        }
-
-        fclose(f);
 
         // u32 winv[n * n];
         // u32 d[n];
