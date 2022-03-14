@@ -277,13 +277,14 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
         long nnz = M->nnz;
         int nrows = transpose ? M->ncols : M->nrows;
 
-        fprintf(stderr, "nrows = %d", nrows);
         int const *Mi = M->i;
         int const *Mj = M->j;
         u32 const *Mx = M->x;
 
         for (long i = 0; i < nrows * n; i++)
+        {
                 y[i] = 0;
+        }
 
         for (long k = 0; k < nnz; k++)
         {
@@ -292,6 +293,7 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                 u64 v = Mx[k];
                 for (int l = 0; l < n; l++)
                 {
+
                         u64 a = y[i * n + l];
                         u64 b = x[j * n + l];
                         y[i * n + l] = (a + v * b) % prime;
@@ -674,24 +676,20 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         // if (stop_after > 0 && n_iterations == stop_after)
         //         break;
 
-        fprintf(stderr, "MULT btw temp(%ld) = M(%d * %d) * V (%ld)\n", block_size_pad, nrows, ncols, block_size_pad);
-
         sparse_matrix_vector_product(tmp, M, v, !transpose);
-
-        FILE *f = fopen("check.mtx", "w");
-
-        for (long u = 0; u < block_size_pad; u++)
-        {
-                fprintf(f, "%d \n", tmp[u]);
-        }
-
-        fclose(f);
 
         sparse_matrix_vector_product(Av, M, tmp, transpose);
 
-        u32 vtAv[n * n];
-        u32 vtAAv[n * n];
-        block_dot_products(vtAv, vtAAv, nrows, Av, v);
+        FILE *f = fopen("check.mtx", "a+");
+        for (int u = 0; u < block_size_pad; u++)
+        {
+                fprintf(f, "%d\n", Av[u]);
+        }
+        fclose(f);
+
+        // u32 vtAv[n * n];
+        // u32 vtAAv[n * n];
+        // block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
         // u32 winv[n * n];
         // u32 d[n];
