@@ -286,6 +286,8 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                 y[i] = 0;
         }
 
+        // FILE *f = fopen("check.mtx", "a+");
+
         for (long k = 0; k < nnz; k++)
         {
                 int i = transpose ? Mj[k] : Mi[k];
@@ -297,8 +299,12 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                         u64 a = y[i * n + l];
                         u64 b = x[j * n + l];
                         y[i * n + l] = (a + v * b) % prime;
+
+                        // fprintf(f, "i= %d, j = %d, tmp[%ld],v[%ld], tmp = %ld,v=%ld\n", i, j, i * n + l, j * n + l, a, b);
                 }
         }
+
+        // fclose(f);
 }
 
 /****************** dense linear algebra modulo p *************************/
@@ -678,12 +684,12 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         sparse_matrix_vector_product(tmp, M, v, !transpose);
 
-        sparse_matrix_vector_product(Av, M, tmp, transpose);
+        // sparse_matrix_vector_product(Av, M, tmp, transpose);
 
         FILE *f = fopen("check.mtx", "a+");
         for (int u = 0; u < block_size_pad; u++)
         {
-                fprintf(f, "%d\n", Av[u]);
+                fprintf(f, "%d\n", tmp[u]);
         }
         fclose(f);
 
