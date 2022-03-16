@@ -481,15 +481,24 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(v) * Av */
 void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
 {
+        // FILE *f = fopen("check.mtx", "a+");
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
+        {
+                // fprintf(f, "v[%ld] = %d, Av[%ld] = %d\n", i * n, v[i * n], i * n, Av[i * n]);
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
+        }
+
+        // fclose(f);
 
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
         for (int i = 0; i < N; i += n)
+        {
+
                 matmul_CpAtB(vtAAv, &Av[i * n], &Av[i * n]);
+        }
 }
 
 /* Compute the next values of v (in tmp) and p */
@@ -686,16 +695,16 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         sparse_matrix_vector_product(Av, M, tmp, transpose);
 
+        u32 vtAv[n * n];
+        u32 vtAAv[n * n];
+        block_dot_products(vtAv, vtAAv, nrows, Av, v);
+
         FILE *f = fopen("check.mtx", "a+");
         for (int u = 0; u < block_size_pad; u++)
         {
                 fprintf(f, "%d\n", Av[u]);
         }
         fclose(f);
-
-        // u32 vtAv[n * n];
-        // u32 vtAAv[n * n];
-        // block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
         // u32 winv[n * n];
         // u32 d[n];
