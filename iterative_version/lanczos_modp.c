@@ -684,12 +684,12 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         sparse_matrix_vector_product(tmp, M, v, !transpose);
 
-        // sparse_matrix_vector_product(Av, M, tmp, transpose);
+        sparse_matrix_vector_product(Av, M, tmp, transpose);
 
         FILE *f = fopen("check.mtx", "a+");
         for (int u = 0; u < block_size_pad; u++)
         {
-                fprintf(f, "%d\n", tmp[u]);
+                fprintf(f, "%d\n", Av[u]);
         }
         fclose(f);
 

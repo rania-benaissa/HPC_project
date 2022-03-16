@@ -587,9 +587,46 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                 {
 
                         u64 b = x[j * n + l];
+
                         y[i * n + l] += (v * b);
                 }
         }
+}
+
+/* y += M*x or y += transpose(M)*x, according to the transpose flag */
+void sparse_matrix_vector_product2(u32 *y, struct sparsematrix_t const *M, u32 const *x, bool transpose)
+{
+        long nnz = M->nnz;
+        int nrows = transpose ? M->ncols : M->nrows;
+
+        int const *Mi = M->i;
+        int const *Mj = M->j;
+        u32 const *Mx = M->x;
+
+        for (long i = 0; i < nrows * n; i++)
+        {
+                y[i] = 0;
+        }
+
+        // FILE *f = fopen("check.mtx", "a+");
+
+        for (long k = 0; k < nnz; k++)
+        {
+                int i = transpose ? Mj[k] : Mi[k];
+                int j = transpose ? Mi[k] : Mj[k];
+                u64 v = Mx[k];
+                for (int l = 0; l < n; l++)
+                {
+
+                        u64 a = y[i * n + l];
+                        u64 b = x[j * n + l];
+                        y[i * n + l] = (a + v * b) % prime;
+
+                        // fprintf(f, "i= %d, j = %d, tmp[%ld],v[%ld], tmp = %ld,v=%ld\n", i, j, i * n + l, j * n + l, a, b);
+                }
+        }
+
+        // fclose(f);
 }
 
 /****************** dense linear algebra modulo p *************************/
@@ -934,6 +971,72 @@ int getNrows(struct sparsematrix_t const M, bool transpose, int my_rank, int nb_
 
         return nrows;
 }
+
+u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int M_rows, int n, int transpose, int nb_processus, int my_rank)
+{
+
+        int nrows = transpose ? M_processus.nrows : ((M_rows / nb_processus) + n * (M_rows % nb_processus));
+
+        fprintf(stderr, "nrows %d\n", n * nrows);
+
+        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * nrows));
+
+        for (int i = 0; i < n * nrows; i++)
+        {
+
+                tmp_processus[i] = 0;
+        }
+
+        if (transpose == 1)
+        {
+                // fait le calcul matriciel
+                sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
+
+                if (my_rank == 0)
+                {
+
+                        for (int i = 0; i < n * nrows; i++)
+                        {
+                                tmp_processus[i] = tmp_processus[i] % prime;
+                        }
+                        u32 *tmp = malloc(sizeof(*tmp) * (n * nrows));
+
+                        for (int proc = 1; proc < nb_processus; proc++)
+                        {
+                                MPI_Recv(tmp, n * nrows, MPI_INT, proc, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                                for (int i = 0; i < n * nrows; i++)
+                                {
+                                        tmp_processus[i] = (tmp_processus[i] + tmp[i]) % prime;
+                                }
+                        }
+                }
+                else
+                {
+
+                        MPI_Send(tmp_processus, n * nrows, MPI_INT, 0, 10, MPI_COMM_WORLD);
+                }
+
+                // send tmp to everybody
+                MPI_Bcast(tmp_processus, n * nrows, MPI_INT, 0, MPI_COMM_WORLD);
+        }
+        else
+        {
+
+                sparse_matrix_vector_product2(tmp_processus, &M_processus, v_processus, !transpose);
+                // just like in heatsink algorithm
+                u32 *tmp1_processus = tmp_processus;
+                tmp_processus = malloc(sizeof(*tmp_processus) * (n * nb_processus * nrows));
+
+                // do i really need to gather them ? i think it depends on the next computation
+                MPI_Allgather(tmp1_processus, n * nrows, MPI_INT, tmp_processus, n * nrows, MPI_INT, MPI_COMM_WORLD);
+
+                fprintf(stderr, "shitty new dim %d\n", (n * nb_processus * nrows));
+        }
+
+        return tmp_processus;
+}
+
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
 void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_rank, int nb_processus)
 {
@@ -986,20 +1089,9 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         // si c est la matrice transposée
         // int nrows_processus = transpose ? M_processus.ncols : M_processus.nrows;
-        int ncols_processus = transpose ? M_processus.nrows : M_processus.ncols;
+        // int ncols_processus = transpose ? M_processus.nrows : M_processus.ncols;
 
         u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
-
-        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * ncols_processus));
-        // u32 *tmp_processus1 = malloc(sizeof(*tmp_processus1) * (n * ncols_processus));
-
-        for (int i = 0; i < n * ncols_processus; i++)
-        {
-                // tmp_processus1[i] = 0;
-                tmp_processus[i] = 0;
-        }
-
-        // u32 *Av_processus = malloc(sizeof(*Av_processus) * (n * nrows_processus));
 
         // start = wtime();
         //  bool stop = false;
@@ -1012,52 +1104,23 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         /*tmp = M * v(equivalent en tTD de y = M x)*/
 
-        sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
+        // ça ça fait juste le calcule de M * V pour chaque processus
+
+        u32 *tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, nrows, n, transpose, nb_processus, my_rank);
+
+        /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
+        u32 *Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, nrows, n, !transpose, nb_processus, my_rank);
+
+        // THIS PART IS IN PROCESS -> the only problem is to fix the shitty padding (aka the right size of AV)
 
         if (my_rank == 0)
         {
 
-                for (int i = 0; i < n * ncols_processus; i++)
-                {
-                        tmp_processus[i] = tmp_processus[i] % prime;
-                }
-                u32 *tmp = malloc(sizeof(*tmp) * (n * ncols_processus));
-
-                for (int proc = 1; proc < nb_processus; proc++)
-                {
-                        MPI_Recv(tmp, n * ncols_processus, MPI_INT, proc, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                        for (int i = 0; i < n * ncols_processus; i++)
-                        {
-                                tmp_processus[i] = (tmp_processus[i] + tmp[i]) % prime;
-                        }
-                }
-        }
-        else
-        {
-
-                MPI_Send(tmp_processus, n * ncols_processus, MPI_INT, 0, 10, MPI_COMM_WORLD);
-        }
-
-        // je regroupe tous les tmp ensemble et les renvoie aux processus (u can try it it works)
-        // MPI_Allreduce(tmp_processus, tmp_processus1, n * ncols_processus, MPI_INT, operation, MPI_COMM_WORLD);
-
-        // THIS PART IS IN PROCESS -> the only problem is to fix the shitty padding (aka the right size of AV)
-
-        /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
-        // u32 *av_processus1 = malloc(sizeof(*av_processus1) * (n * (nrows / nb_processus)));
-        // sparse_matrix_vector_product(Av_processus, &M_processus, tmp_processus, transpose);
-
-        // MPI_Reduce(Av_processus, av_processus1, (n * (nrows / nb_processus)), MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-
-        if (my_rank == nb_processus - 1)
-        {
-
                 FILE *f = fopen("check.mtx", "a+");
 
-                for (int u = 0; u < n * ncols_processus; u++)
+                for (int u = 0; u < n * nrows; u++)
                 {
-                        fprintf(f, "%d\n", (tmp_processus[u]));
+                        fprintf(f, "%d\n", (Av_processus[u]));
                 }
 
                 fclose(f);
