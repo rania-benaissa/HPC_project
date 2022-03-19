@@ -481,16 +481,16 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(v) * Av */
 void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
 {
-        // FILE *f = fopen("check.mtx", "a+");
+        FILE *f = fopen("product_check.mtx", "a+");
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
         {
-                // fprintf(f, "v[%ld] = %d, Av[%ld] = %d\n", i * n, v[i * n], i * n, Av[i * n]);
+                fprintf(f, " vtAv[1] =  %d\n", vtAv[1]);
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
         }
 
-        // fclose(f);
+        fclose(f);
 
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
@@ -700,9 +700,9 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
         FILE *f = fopen("check.mtx", "a+");
-        for (int u = 0; u < block_size_pad; u++)
+        for (int u = 0; u < n * n; u++)
         {
-                fprintf(f, "%d\n", Av[u]);
+                fprintf(f, "%d\n", vtAAv[u]);
         }
         fclose(f);
 

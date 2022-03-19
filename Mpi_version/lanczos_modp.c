@@ -565,36 +565,8 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
         return v_processus;
 }
 
-/*ça ça calcule juste la multiplication paralelle*/
-void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 const *x, bool transpose)
-{
-        long nnz = M->nnz;
-        int nrows = transpose ? M->ncols : M->nrows;
-
-        int const *Mi = M->i;
-        int const *Mj = M->j;
-        u32 const *Mx = M->x;
-
-        for (long i = 0; i < nrows * n; i++)
-                y[i] = 0;
-
-        for (long k = 0; k < nnz; k++)
-        {
-                int i = transpose ? Mj[k] : Mi[k];
-                int j = transpose ? Mi[k] : Mj[k];
-                u64 v = Mx[k];
-                for (int l = 0; l < n; l++)
-                {
-
-                        u64 b = x[j * n + l];
-
-                        y[i * n + l] += (v * b);
-                }
-        }
-}
-
 /* y += M*x or y += transpose(M)*x, according to the transpose flag */
-void sparse_matrix_vector_product2(u32 *y, struct sparsematrix_t const *M, u32 const *x, bool transpose)
+void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 const *x, bool transpose)
 {
         long nnz = M->nnz;
         int nrows = transpose ? M->ncols : M->nrows;
@@ -803,16 +775,16 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(Av) * Av */
 void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
 {
-        // FILE *f = fopen("check.mtx", "a+");
+        FILE *f = fopen("product_check.mtx", "a+");
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
         {
-                // fprintf(f, "v[%ld] = %d, Av[%ld] = %d\n", i * n, v[i * n], i * n, Av[i * n]);
+                fprintf(f, "vtAv[1]=%d\n", vtAv[1]);
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
         }
 
-        // fclose(f);
+        fclose(f);
 
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
@@ -984,7 +956,6 @@ u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_
         int nrows = transpose ? M_processus.nrows : M_processus.ncols;
 
         // fprintf(stderr, "nrows %d\n", n * nrows);
-
         u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * nrows));
 
         for (int i = 0; i < n * nrows; i++)
@@ -993,10 +964,10 @@ u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_
                 tmp_processus[i] = 0;
         }
 
+        sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
+
         if (transpose == 1)
         {
-                // fait le calcul matriciel
-                sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
 
                 if (my_rank == 0)
                 {
@@ -1024,19 +995,8 @@ u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_
                 }
 
                 // send tmp to everybody
+
                 MPI_Bcast(tmp_processus, n * nrows, MPI_INT, 0, MPI_COMM_WORLD);
-        }
-        else
-        {
-
-                // this one computes everything mult + previous
-                sparse_matrix_vector_product2(tmp_processus, &M_processus, v_processus, !transpose);
-                // just like in heatsink algorithm
-                // u32 *tmp1_processus = tmp_processus;
-                // tmp_processus = malloc(sizeof(*tmp_processus) * (n * nb_processus * nrows));
-
-                // // do i really need to gather them ? i think it depends on the next computation
-                // MPI_Allgather(tmp1_processus, n * nrows, MPI_INT, tmp_processus, n * nrows, MPI_INT, MPI_COMM_WORLD);
         }
 
         return tmp_processus;
@@ -1115,12 +1075,32 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
 
-        /* IMPORTANT = IL FAUT FAIRE UN GATHER pour avoir le AV total -> if u dont get why ask me i ll explain*/
         u32 *Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, n, !transpose, nb_processus, my_rank);
 
-        // u32 vtAv_processus[n * n];  // xt * z
-        // u32 vtAAv_processus[n * n]; // zt * z
-        // block_dot_products(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
+        u32 vtAv_processus[n * n];  // xt * z
+        u32 vtAAv_processus[n * n]; // zt * z
+        block_dot_products(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
+
+        if (my_rank == 0)
+        {
+
+                u32 vtAv_processus_tmp[n * n];
+
+                for (int proc = 1; proc < nb_processus; proc++)
+                {
+                        MPI_Recv(vtAv_processus_tmp, n * n, MPI_INT, proc, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        for (int i = 0; i < n * n; i++)
+                        {
+                                vtAv_processus[i] = (vtAv_processus_tmp[i] + vtAv_processus[i]) % prime;
+                        }
+                }
+        }
+        else
+        {
+
+                MPI_Send(vtAv_processus, n * n, MPI_INT, 0, 10, MPI_COMM_WORLD);
+        }
 
         // bloc bloc B  = vt*Av = xt * z / A = vt*A*Av
         if (my_rank == 0)
@@ -1130,7 +1110,7 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
                 for (int u = 0; u < n * nrows_processus; u++)
                 {
-                        fprintf(f, "%d\n", (Av_processus[u]));
+                        fprintf(f, "%d\n", (v_processus[u]));
                 }
 
                 fclose(f);
