@@ -519,7 +519,7 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
                 {
                         step = (proc == nb_processus - 1) ? (nrows % nb_processus) : 0;
 
-                        u32 *temp_v = malloc(sizeof(*temp_v) * (n * (ncols_processus + step)));
+                        u32 *temp_v = malloc(sizeof(*temp_v) * (n * (ncols_processus + n * step)));
 
                         // fprintf(stderr, "taille %d\n", n * (ncols_processus) + n * step);
 
@@ -535,7 +535,18 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
                                 i++;
                         }
 
-                        MPI_Send(temp_v, n * (ncols_processus + step), MPI_INT, proc, MSG_TAG, MPI_COMM_WORLD);
+                        // add the padding
+
+                        for (int k = i; k < (n * (ncols_processus + n * step)); k++)
+                        {
+
+                                temp_v[k] = 0;
+                        }
+
+                        // fprintf(stderr, "step %d\n", step);
+                        // fprintf(stderr, "ncols %d\n", ncols_processus);
+
+                        MPI_Send(temp_v, (n * (ncols_processus + n * step)), MPI_INT32_T, proc, MSG_TAG, MPI_COMM_WORLD);
                 }
         }
 
@@ -544,9 +555,9 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
 
                 step = (my_rank == nb_processus - 1) ? (nrows % nb_processus) : 0;
 
-                v_processus = malloc(sizeof(*v_processus) * (n * (ncols_processus + step)));
+                v_processus = malloc(sizeof(*v_processus) * (n * (ncols_processus + n * step)));
 
-                MPI_Recv(v_processus, (n * (ncols_processus + step)), MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(v_processus, (n * (ncols_processus + n * step)), MPI_INT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
         // if (my_rank == nb_processus - 1)
         //  {
@@ -620,6 +631,7 @@ void matmul_CpAB(u32 *C, u32 const *A, u32 const *B)
 /* C += transpose(A)*B   for n x n matrices */
 void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
 {
+        // FILE *f = fopen("compute_product_check.mtx", "a");
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
                         for (int k = 0; k < n; k++)
@@ -628,7 +640,10 @@ void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
                                 u64 y = A[k * n + i];
                                 u64 z = B[k * n + j];
                                 C[i * n + j] = (x + y * z) % prime;
+                                // fprintf(f, "vtav[%ld] = %ld + (%ld * %ld)\n", i * n + j, x, y, z);
                         }
+
+        // fclose(f);
 }
 
 /* return a^(-1) mod b */
@@ -775,21 +790,22 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(Av) * Av */
 void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
 {
-        FILE *f = fopen("product_check.mtx", "a+");
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
         {
-                fprintf(f, "vtAv[1]=%d\n", vtAv[1]);
+
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
         }
 
-        fclose(f);
-
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
+
         for (int i = 0; i < N; i += n)
+        {
+
                 matmul_CpAtB(vtAAv, &Av[i * n], &Av[i * n]);
+        }
 }
 
 /* Compute the next values of v (in tmp) and p */
@@ -950,56 +966,77 @@ int getNrows(struct sparsematrix_t const M, bool transpose, int my_rank, int nb_
         return nrows;
 }
 
-u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int n, int transpose, int nb_processus, int my_rank)
+// operator of the MPI_reduce
+void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datatype)
+{
+        // MUTE THAT PARAMETER è.é
+        (void)datatype;
+        int *input = (int *)inputBuffer;
+        int *output = (int *)outputBuffer;
+
+        for (int i = 0; i < *len; i++)
+        {
+                output[i] = (output[i] + input[i]) % prime;
+        }
+}
+
+u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int n, int transpose)
 {
 
         int nrows = transpose ? M_processus.nrows : M_processus.ncols;
 
+        int step = nrows % n;
+
         // fprintf(stderr, "nrows %d\n", n * nrows);
-        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * nrows));
+        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * (nrows + step)));
 
-        for (int i = 0; i < n * nrows; i++)
+        // here i added some padding
+        for (int i = 0; i < n * (nrows + step); i++)
         {
-
                 tmp_processus[i] = 0;
         }
 
+        // chaque processeur calcul la matrice qu'il a
         sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
+
+        // si on calcule la 1ere multiplication
 
         if (transpose == 1)
         {
+                u32 *tmp = malloc(sizeof(*tmp_processus) * (n * (nrows + step)));
 
-                if (my_rank == 0)
-                {
+                // Create the operation handle
+                MPI_Op operation;
 
-                        for (int i = 0; i < n * nrows; i++)
-                        {
-                                tmp_processus[i] = tmp_processus[i] % prime;
-                        }
-                        u32 *tmp = malloc(sizeof(*tmp) * (n * nrows));
+                MPI_Op_create(&sumMod, 1, &operation);
 
-                        for (int proc = 1; proc < nb_processus; proc++)
-                        {
-                                MPI_Recv(tmp, n * nrows, MPI_INT, proc, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Allreduce(tmp_processus, tmp, (n * (nrows + step)), MPI_INT, operation, MPI_COMM_WORLD);
 
-                                for (int i = 0; i < n * nrows; i++)
-                                {
-                                        tmp_processus[i] = (tmp_processus[i] + tmp[i]) % prime;
-                                }
-                        }
-                }
-                else
-                {
+                MPI_Op_free(&operation);
 
-                        MPI_Send(tmp_processus, n * nrows, MPI_INT, 0, 10, MPI_COMM_WORLD);
-                }
-
-                // send tmp to everybody
-
-                MPI_Bcast(tmp_processus, n * nrows, MPI_INT, 0, MPI_COMM_WORLD);
+                tmp_processus = tmp;
         }
 
         return tmp_processus;
+}
+
+void computeBlockProduct(u32 *vtAv_processus, u32 *vtAAv_processus, int ncols, u32 *Av_processus, u32 *v_processus)
+{
+
+        u32 *vtAv_tmp = malloc((n * n) * sizeof(*vtAv_tmp)); // xt * z
+
+        u32 *vtAAv_tmp = malloc((n * n) * sizeof(*vtAAv_tmp)); // zt * z
+
+        block_dot_products(vtAv_tmp, vtAAv_tmp, ncols, Av_processus, v_processus);
+
+        // Create the operation handle
+        MPI_Op operation;
+        MPI_Op_create(&sumMod, 1, &operation);
+
+        MPI_Allreduce(vtAv_tmp, vtAv_processus, n * n, MPI_INT, operation, MPI_COMM_WORLD);
+        MPI_Allreduce(vtAAv_tmp, vtAAv_processus, n * n, MPI_INT, operation, MPI_COMM_WORLD);
+
+        MPI_Op_free(&operation);
 }
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
@@ -1012,140 +1049,92 @@ void block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         /* allocate blocks of vectors */
 
-        // on garde ça in the main thing
+        // ça c est le nombre de colonnes en vrai
         int nrows = getNrows(M, transpose, my_rank, nb_processus);
 
-        // long Npad = ((nrows + n - 1) / n) * n;
-
-        // ça c est la taille de mon v
-        // long block_size_pad = Npad * n;
-
-        // division entiere
-        // long Npad = ((nrows + n - 1) / n) * n;
-
-        // int ncols_processus = Npad / nb_processus;
-
-        // int nrows_processus_pad = (nrows / nb_processus) + (nrows % nb_processus);
-
-        // char human_size[8];
-
-        // human_format(human_size, 4 * sizeof(int) * block_size_pad);
-
-        // printf("  - Extra storage needed: %sB\n", human_size);
-
-        // // bla bla to avoid repeating
-        // if (my_rank == 0)
-        // {
-        //         /* warn the user */
-        //         expected_iterations = 1 + ncols / n;
-
-        //         char human_its[8];
-        //         human_format(human_its, expected_iterations);
-        //         printf("  - Expecting %s iterations\n", human_its);
-        // }
-
-        // // more suited initialisation ?
-
         /************* main loop *************/
-        printf("  - Main loop\n");
+        // printf("  - Main loop\n");
 
         // je subdivise M first
         struct sparsematrix_t M_processus = subdiviseM(M, nb_processus, my_rank);
 
         // si c est la matrice transposée
-        int nrows_processus = transpose ? M_processus.ncols : M_processus.nrows;
+        // int nrows_processus = transpose ? M_processus.ncols : M_processus.nrows;
         // int ncols_processus = transpose ? M_processus.nrows : M_processus.ncols;
 
         u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
 
-        // start = wtime();
-        //  bool stop = false;
+        // same size as tmp_processus
+        u32 *p = malloc(sizeof(*p) * (n * (M_processus.nrows + (M_processus.nrows % n))));
 
-        // while (true)
-        // {
+        u32 *tmp_processus = NULL;
+        u32 *Av_processus = NULL;
+        u32 *vtAv_processus = malloc((n * n) * sizeof(*vtAv_processus)); // xt * z
+        u32 *vtAAv_processus = malloc((n * n) * sizeof(*vtAAv_processus));
 
-        // if (stop_after > 0 && n_iterations == stop_after)
-        //         break;
+        start = wtime();
+        bool stop = false;
 
-        /*tmp = M * v(equivalent en tTD de y = M x)*/
-
-        // ça ça fait juste le calcule de M * V pour chaque processus
-
-        u32 *tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, n, transpose, nb_processus, my_rank);
-
-        /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
-
-        u32 *Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, n, !transpose, nb_processus, my_rank);
-
-        u32 vtAv_processus[n * n];  // xt * z
-        u32 vtAAv_processus[n * n]; // zt * z
-        block_dot_products(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
-
-        if (my_rank == 0)
+        while (true)
         {
 
-                u32 vtAv_processus_tmp[n * n];
+                if (stop_after > 0 && n_iterations == stop_after)
+                        break;
 
-                for (int proc = 1; proc < nb_processus; proc++)
-                {
-                        MPI_Recv(vtAv_processus_tmp, n * n, MPI_INT, proc, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                /*tmp = M * v(equivalent en tTD de y = M x)*/
+                tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, n, transpose);
 
-                        for (int i = 0; i < n * n; i++)
-                        {
-                                vtAv_processus[i] = (vtAv_processus_tmp[i] + vtAv_processus[i]) % prime;
-                        }
-                }
+                /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
+                Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, n, !transpose);
+
+                // bloc bloc B  = vt*Av = (xt * z ) / A = vt*A*Av
+                computeBlockProduct(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
+
+                u32 winv[n * n];
+                u32 d[n];
+                stop = (semi_inverse(vtAv_processus, winv, d) == 0);
+
+                // fprintf(stderr, "stop = %d\n", stop);
+
+                /* check that everything is working ; disable in production */
+                correctness_tests(vtAv_processus, vtAAv_processus, winv, d);
+
+                if (stop)
+                        break;
+
+                // so the new version of v is in tmp
+                orthogonalize(v_processus, tmp_processus, p, d, vtAv_processus, vtAAv_processus, winv, M_processus.ncols, Av_processus);
+
+                // /* the next value of v is in tmp ; copy */
+                for (long i = 0; i < M_processus.ncols * n; i++)
+                        v_processus[i] = tmp_processus[i];
+
+                // if (my_rank == nb_processus - 1)
+                // {
+
+                //         FILE *f = fopen("check.mtx", "a+");
+
+                //         for (int u = 0; u < n * M_processus.ncols + n; u++)
+                //         {
+                //                 fprintf(f, "%d\n", v_processus[u]);
+                //         }
+
+                //         fclose(f);
+                // }
+                if (my_rank == 0)
+                        verbosity();
         }
-        else
-        {
 
-                MPI_Send(vtAv_processus, n * n, MPI_INT, 0, 10, MPI_COMM_WORLD);
-        }
+        printf("\n");
 
-        // bloc bloc B  = vt*Av = xt * z / A = vt*A*Av
-        if (my_rank == 0)
-        {
-
-                FILE *f = fopen("check.mtx", "a+");
-
-                for (int u = 0; u < n * nrows_processus; u++)
-                {
-                        fprintf(f, "%d\n", (v_processus[u]));
-                }
-
-                fclose(f);
-        }
-        // u32 winv[n * n];
-        // u32 d[n];
-        // stop = (semi_inverse(vtAv, winv, d) == 0);
-
-        // /* check that everything is working ; disable in production */
-        // correctness_tests(vtAv, vtAAv, winv, d);
-
-        // if (stop)
-        //         break;
-
-        // orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
-
-        // /* the next value of v is in tmp ; copy */
-        // for (long i = 0; i < block_size; i++)
-        //         v[i] = tmp[i];
-
-        // verbosity();
-        //}
-
-        // if (my_rank == 0)
-        // {
-        //         printf("\n");
-
-        //         if (stop_after < 0)
-        //                 final_check(nrows, ncols, v, tmp);
-        //         printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-        //         free(tmp);
-        //         free(Av);
-        //         free(p);
-        // }
-        // return v; // x
+        if (stop_after < 0)
+                final_check(M_processus.ncols, M_processus.nrows, v_processus, tmp_processus);
+        printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
+        free(tmp_processus);
+        free(Av_processus);
+        free(p);
+        // je retourne pour le moment les vi
+        // return v_processus; // x
 }
 
 /**************************** dense vector block IO ************************/

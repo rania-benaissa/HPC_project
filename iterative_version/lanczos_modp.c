@@ -326,6 +326,7 @@ void matmul_CpAB(u32 *C, u32 const *A, u32 const *B)
 /* C += transpose(A)*B   for n x n matrices */
 void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
 {
+        // FILE *f = fopen("compute_product_check.mtx", "a");
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
                         for (int k = 0; k < n; k++)
@@ -334,7 +335,10 @@ void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
                                 u64 y = A[k * n + i];
                                 u64 z = B[k * n + j];
                                 C[i * n + j] = (x + y * z) % prime;
+                                //   fprintf(f, "vtav[%ld] = %ld + (%ld * %ld)\n", i * n + j, x, y, z);
                         }
+
+        // fclose(f);
 }
 
 /* return a^(-1) mod b */
@@ -481,16 +485,14 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(v) * Av */
 void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
 {
-        FILE *f = fopen("product_check.mtx", "a+");
+
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
         {
-                fprintf(f, " vtAv[1] =  %d\n", vtAv[1]);
+
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
         }
-
-        fclose(f);
 
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
@@ -507,14 +509,19 @@ void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 
 {
         /* compute the n x n matrix c */
         u32 c[n * n];
+
         u32 spliced[n * n];
+
         for (int i = 0; i < n; i++)
+
                 for (int j = 0; j < n; j++)
                 {
                         spliced[i * n + j] = d[j] ? vtAAv[i * n + j] : vtAv[i * n + j];
                         c[i * n + j] = 0;
                 }
+
         matmul_CpAB(c, winv, spliced);
+
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
                         c[i * n + j] = prime - c[i * n + j];
@@ -528,8 +535,10 @@ void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 
         for (long i = 0; i < N; i++)
                 for (long j = 0; j < n; j++)
                         tmp[i * n + j] = d[j] ? Av[i * n + j] : v[i * n + j];
+
         for (long i = 0; i < N; i += n)
                 matmul_CpAB(&tmp[i * n], &v[i * n], c);
+
         for (long i = 0; i < N; i += n)
                 matmul_CpAB(&tmp[i * n], &p[i * n], vtAvd);
 
@@ -537,6 +546,7 @@ void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 
         for (long i = 0; i < N; i++)
                 for (long j = 0; j < n; j++)
                         p[i * n + j] = d[j] ? 0 : p[i * n + j];
+
         for (long i = 0; i < N; i += n)
                 matmul_CpAB(&p[i * n], &v[i * n], winv);
 }
@@ -683,47 +693,47 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 v[i] = random64() % prime;
 
         /************* main loop *************/
-        // printf("  - Main loop\n");
-        // start = wtime();
-        // bool stop = false;
-        // while (true)
-        // {
-        // if (stop_after > 0 && n_iterations == stop_after)
-        //         break;
-
-        sparse_matrix_vector_product(tmp, M, v, !transpose);
-
-        sparse_matrix_vector_product(Av, M, tmp, transpose);
-
-        u32 vtAv[n * n];
-        u32 vtAAv[n * n];
-        block_dot_products(vtAv, vtAAv, nrows, Av, v);
-
-        FILE *f = fopen("check.mtx", "a+");
-        for (int u = 0; u < n * n; u++)
+        printf("  - Main loop\n");
+        start = wtime();
+        bool stop = false;
+        while (true)
         {
-                fprintf(f, "%d\n", vtAAv[u]);
+                if (stop_after > 0 && n_iterations == stop_after)
+                        break;
+
+                sparse_matrix_vector_product(tmp, M, v, !transpose);
+
+                sparse_matrix_vector_product(Av, M, tmp, transpose);
+
+                u32 vtAv[n * n];
+                u32 vtAAv[n * n];
+
+                block_dot_products(vtAv, vtAAv, nrows, Av, v);
+
+                u32 winv[n * n];
+                u32 d[n];
+                stop = (semi_inverse(vtAv, winv, d) == 0);
+
+                /* check that everything is working ; disable in production */
+                correctness_tests(vtAv, vtAAv, winv, d);
+
+                if (stop)
+                        break;
+
+                orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
+                // FILE *f = fopen("check.mtx", "a+");
+                // for (int u = 0; u < block_size_pad; u++)
+                // {
+                //         fprintf(f, "%d\n", tmp[u]);
+                // }
+                // fclose(f);
+
+                /* the next value of v is in tmp ; copy */
+                for (long i = 0; i < block_size; i++)
+                        v[i] = tmp[i];
+
+                verbosity();
         }
-        fclose(f);
-
-        // u32 winv[n * n];
-        // u32 d[n];
-        // stop = (semi_inverse(vtAv, winv, d) == 0);
-
-        // /* check that everything is working ; disable in production */
-        // correctness_tests(vtAv, vtAAv, winv, d);
-
-        // if (stop)
-        //         break;
-
-        // orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
-
-        // /* the next value of v is in tmp ; copy */
-        // for (long i = 0; i < block_size; i++)
-        //         v[i] = tmp[i];
-
-        // verbosity();
-        //}
         printf("\n");
 
         if (stop_after < 0)
