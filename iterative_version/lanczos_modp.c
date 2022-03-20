@@ -700,11 +700,9 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         start = wtime();
         bool stop = false;
 
-        int pff = 0;
-
         while (true)
         {
-                pff++;
+
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
