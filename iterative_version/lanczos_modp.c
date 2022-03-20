@@ -663,12 +663,15 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         long Npad = ((nrows + n - 1) / n) * n;
         long block_size_pad = Npad * n;
         char human_size[8];
+
         human_format(human_size, 4 * sizeof(int) * block_size_pad);
         printf("  - Extra storage needed: %sB\n", human_size);
+
         u32 *v = malloc(sizeof(*v) * block_size_pad);
         u32 *tmp = malloc(sizeof(*tmp) * block_size_pad);
         u32 *Av = malloc(sizeof(*Av) * block_size_pad);
         u32 *p = malloc(sizeof(*p) * block_size_pad);
+
         if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
                 errx(1, "impossible d'allouer les blocs de vecteur");
 
@@ -696,8 +699,12 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         printf("  - Main loop\n");
         start = wtime();
         bool stop = false;
+
+        int pff = 0;
+
         while (true)
         {
+                pff++;
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
@@ -721,12 +728,6 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                         break;
 
                 orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
-                // FILE *f = fopen("check.mtx", "a+");
-                // for (int u = 0; u < block_size_pad; u++)
-                // {
-                //         fprintf(f, "%d\n", tmp[u]);
-                // }
-                // fclose(f);
 
                 /* the next value of v is in tmp ; copy */
                 for (long i = 0; i < block_size; i++)
@@ -734,6 +735,14 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
                 verbosity();
         }
+
+        FILE *f = fopen("check.mtx", "a+");
+        for (int u = 0; u < block_size; u++)
+        {
+                fprintf(f, "%d\n", v[u]);
+        }
+        fclose(f);
+
         printf("\n");
 
         if (stop_after < 0)
