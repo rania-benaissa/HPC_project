@@ -720,7 +720,7 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 stop = (semi_inverse(vtAv, winv, d) == 0);
 
                 /* check that everything is working ; disable in production */
-                correctness_tests(vtAv, vtAAv, winv, d);
+                // correctness_tests(vtAv, vtAAv, winv, d);
 
                 if (stop)
                         break;
@@ -734,14 +734,14 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 verbosity();
         }
 
-        FILE *f = fopen("check.mtx", "a+");
-        for (int u = 0; u < block_size; u++)
-        {
-                fprintf(f, "%d\n", v[u]);
-        }
-        fclose(f);
+        // FILE *f = fopen("check.mtx", "a+");
+        // for (int u = 0; u < block_size; u++)
+        // {
+        //         fprintf(f, "%d\n", v[u]);
+        // }
+        // fclose(f);
 
-        printf("\n");
+        // printf("\n");
 
         if (stop_after < 0)
                 final_check(nrows, ncols, v, tmp);

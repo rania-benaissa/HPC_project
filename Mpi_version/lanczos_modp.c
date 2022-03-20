@@ -1,5 +1,5 @@
 /*
- * Sequential implementation of the Block-Lanczos algorithm.
+ * MPI version of the Block-Lanczos algorithm.
  *
  * This is based on the paper:
  *     "A modified block Lanczos algorithm with fewer vectors"
@@ -749,7 +749,7 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
 
                 MPI_Scatter(NULL, 0, NULL, &(M_processus.ncols), 1, MPI_INT, 0, MPI_COMM_WORLD);
                 MPI_Scatter(NULL, 0, NULL, &(M_processus.nnz), 1, MPI_LONG, 0, MPI_COMM_WORLD);
-                fprintf(stderr, "nnz for processus %d = %ld\n", my_rank, M_processus.nnz);
+
                 // a initialiser
                 M_processus.i = malloc((M_processus.nnz) * sizeof(*M_processus.i));
                 M_processus.j = malloc((M_processus.nnz) * sizeof(*M_processus.j));
@@ -1073,7 +1073,7 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
                 stop = (semi_inverse(vtAv_processus, winv, d) == 0);
 
                 /* check that everything is working ; disable in production */
-                correctness_tests(vtAv_processus, vtAAv_processus, winv, d);
+                // correctness_tests(vtAv_processus, vtAAv_processus, winv, d);
 
                 if (stop)
                         break;
@@ -1126,7 +1126,7 @@ int main(int argc, char **argv)
         if (my_rank == 0)
                 sparsematrix_mm_load(&M, matrix_filename);
 
-        // // coeur du travail
+        // coeur du travail
         u32 *kernel = block_lanczos(M, n, right_kernel, my_rank, nb_processus);
 
         if (my_rank == 0)
