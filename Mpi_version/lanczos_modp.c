@@ -655,8 +655,6 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
 
         struct sparsematrix_t M_processus;
 
-        int MSG_TAG = 10;
-
         if (my_rank == 0)
         {
 
@@ -669,7 +667,6 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 // je keep les infos du processus 0
 
                 M_processus.nrows = M.nrows;
-                M_processus.ncols = bloc_size;
 
                 // nb nnz par processus
                 long int *nnz_processus = malloc(nb_processus * sizeof(*nnz_processus));
@@ -677,6 +674,10 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 int *cols_processus = malloc(nb_processus * sizeof(*cols_processus));
 
                 int u = 0;
+
+                int displs[nb_processus];
+
+                int nnz[nb_processus];
 
                 // on reecupere le nombre de valeurs non nulles par colonnes
                 for (int i = 0; i < nb_processus; i++)
@@ -695,6 +696,8 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                                 u++;
                         }
 
+                        nnz[i] = nnz_processus[i];
+
                         fprintf(stderr, "nb of nnz for processus %d = %ld\n", i, nnz_processus[i]);
                 }
 
@@ -704,78 +707,62 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 M_processus.j = malloc(nnz_processus[0] * sizeof(*M_processus.j));
                 M_processus.x = malloc(nnz_processus[0] * sizeof(*M_processus.x));
 
-                u = 0;
-
-                while (M.j[u] < bloc_size)
-                {
-                        M_processus.i[u] = M.i[u];
-                        M_processus.j[u] = M.j[u];
-                        M_processus.x[u] = M.x[u];
-
-                        u++;
-                }
-
-                M_processus.nnz = nnz_processus[0];
-
                 // je cumule les nnz de chaque processus pour savoir ou les vals nnz commencent
                 long int cum_nnz_processus = nnz_processus[0];
+
+                // // position du 1er element a donner au proc 0
+                displs[0] = 0;
 
                 // j'envoie le reste aux autres processus
                 for (int i = 1; i < nb_processus; i++)
                 {
-
-                        int *tempi = malloc(nnz_processus[i] * sizeof(*tempi));
-                        int *tempj = malloc(nnz_processus[i] * sizeof(*tempj));
-                        int *tempx = malloc(nnz_processus[i] * sizeof(*tempx));
 
                         for (int u = 0; u < nnz_processus[i]; u++)
                         {
                                 // dans le cas où y a un padding
                                 if (M.j[u + cum_nnz_processus] >= bloc_size * nb_processus)
 
-                                        tempj[u] = M.j[u + cum_nnz_processus] % (bloc_size) + bloc_size;
+                                        M.j[u + cum_nnz_processus] = M.j[u + cum_nnz_processus] % (bloc_size) + bloc_size;
 
                                 else
-                                        tempj[u] = M.j[u + cum_nnz_processus] % (bloc_size);
-
-                                tempx[u] = M.x[u + cum_nnz_processus];
-                                tempi[u] = M.i[u + cum_nnz_processus];
+                                        M.j[u + cum_nnz_processus] = M.j[u + cum_nnz_processus] % bloc_size;
                         }
 
+                        displs[i] = cum_nnz_processus;
                         cum_nnz_processus += nnz_processus[i];
-
-                        MPI_Send(&M.nrows, 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(&cols_processus[i], 1, MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-
-                        MPI_Send(&nnz_processus[i], 1, MPI_LONG_INT, i, MSG_TAG, MPI_COMM_WORLD);
-
-                        MPI_Send(tempi, nnz_processus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(tempj, nnz_processus[i], MPI_INT, i, MSG_TAG, MPI_COMM_WORLD);
-                        MPI_Send(tempx, nnz_processus[i], MPI_UINT32_T, i, MSG_TAG, MPI_COMM_WORLD);
                 }
+
+                // je share les infos
+                MPI_Bcast(&(M_processus.nrows), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+                MPI_Scatter(cols_processus, 1, MPI_INT, &(M_processus.ncols), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+                MPI_Scatter(nnz_processus, 1, MPI_LONG, &(M_processus.nnz), 1, MPI_LONG, 0, MPI_COMM_WORLD);
+
+                MPI_Scatterv(M.i, nnz, displs, MPI_INT, M_processus.i, nnz_processus[0], MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(M.j, nnz, displs, MPI_INT, M_processus.j, nnz_processus[0], MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(M.x, nnz, displs, MPI_UINT32_T, M_processus.x, nnz_processus[0], MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
         else
         {
+                MPI_Bcast(&(M_processus.nrows), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-                // les autres processus receptionnent leurs vals
-                MPI_Recv(&(M_processus.nrows), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus.ncols), 1, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&(M_processus.nnz), 1, MPI_LONG_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                // fprintf(stderr, "nb of nnz = %ld\n", M_processus->nnz);
-                //  // has to be allocated first
+                MPI_Scatter(NULL, 0, NULL, &(M_processus.ncols), 1, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatter(NULL, 0, NULL, &(M_processus.nnz), 1, MPI_LONG, 0, MPI_COMM_WORLD);
+                fprintf(stderr, "nnz for processus %d = %ld\n", my_rank, M_processus.nnz);
+                // a initialiser
                 M_processus.i = malloc((M_processus.nnz) * sizeof(*M_processus.i));
                 M_processus.j = malloc((M_processus.nnz) * sizeof(*M_processus.j));
                 M_processus.x = malloc((M_processus.nnz) * sizeof(*M_processus.x));
 
-                MPI_Recv(M_processus.i, M_processus.nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus.j, M_processus.nnz, MPI_INT, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(M_processus.x, M_processus.nnz, MPI_UINT32_T, 0, MSG_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Scatterv(NULL, NULL, NULL, NULL, M_processus.i, M_processus.nnz, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(NULL, NULL, NULL, NULL, M_processus.j, M_processus.nnz, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(NULL, NULL, NULL, NULL, M_processus.x, M_processus.nnz, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
 
         // if u wanna verify it
 
-        // if (my_rank == nb_processus - 1)
+        // if (my_rank == 1)
         // {
 
         //         FILE *f = fopen("check.mtx", "a+");
