@@ -645,7 +645,7 @@ void final_check(int nrows, int ncols, u32 const *v, u32 const *vtM)
 }
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
-u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
+void block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 {
         printf("Block Lanczos\n");
 
@@ -698,41 +698,41 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         /************* main loop *************/
         printf("  - Main loop\n");
         start = wtime();
-        bool stop = false;
+        // bool stop = false;
 
-        while (true)
-        {
+        // while (true)
+        // {
 
-                if (stop_after > 0 && n_iterations == stop_after)
-                        break;
+        //         if (stop_after > 0 && n_iterations == stop_after)
+        //                 break;
 
-                sparse_matrix_vector_product(tmp, M, v, !transpose);
+        sparse_matrix_vector_product(tmp, M, v, !transpose);
 
-                sparse_matrix_vector_product(Av, M, tmp, transpose);
+        sparse_matrix_vector_product(Av, M, tmp, transpose);
 
-                u32 vtAv[n * n];
-                u32 vtAAv[n * n];
+        u32 vtAv[n * n];
+        u32 vtAAv[n * n];
 
-                block_dot_products(vtAv, vtAAv, nrows, Av, v);
+        block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
-                u32 winv[n * n];
-                u32 d[n];
-                stop = (semi_inverse(vtAv, winv, d) == 0);
+        u32 winv[n * n];
+        u32 d[n];
+        // stop = (semi_inverse(vtAv, winv, d) == 0);
 
-                /* check that everything is working ; disable in production */
-                // correctness_tests(vtAv, vtAAv, winv, d);
+        /* check that everything is working ; disable in production */
+        // correctness_tests(vtAv, vtAAv, winv, d);
 
-                if (stop)
-                        break;
+        // if (stop)
+        //         break;
 
-                orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
+        orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
 
-                /* the next value of v is in tmp ; copy */
-                for (long i = 0; i < block_size; i++)
-                        v[i] = tmp[i];
+        /* the next value of v is in tmp ; copy */
+        for (long i = 0; i < block_size; i++)
+                v[i] = tmp[i];
 
-                verbosity();
-        }
+        verbosity();
+        //}
 
         // FILE *f = fopen("check.mtx", "a+");
         // for (int u = 0; u < block_size; u++)
@@ -743,13 +743,22 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         // printf("\n");
 
-        if (stop_after < 0)
-                final_check(nrows, ncols, v, tmp);
-        printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-        free(tmp);
-        free(Av);
-        free(p);
-        return v;
+        // if (stop_after < 0)
+        //         final_check(nrows, ncols, v, tmp);
+        // printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
+        // free(tmp);
+        // free(Av);
+        // free(p);
+        // return v;
+
+        FILE *f = fopen("check.mtx", "a+");
+
+        for (long u = 0; u < block_size_pad; u++)
+        {
+                fprintf(f, "%d \n", v[u]);
+        }
+
+        fclose(f);
 }
 
 /**************************** dense vector block IO ************************/
@@ -778,12 +787,12 @@ int main(int argc, char **argv)
         struct sparsematrix_t M;
         sparsematrix_mm_load(&M, matrix_filename);
 
-        u32 *kernel = block_lanczos(&M, n, right_kernel);
+        /*u32 *kernel = */ block_lanczos(&M, n, right_kernel);
 
-        if (kernel_filename)
-                save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
-        else
-                printf("Not saving result (no --output given)\n");
-        free(kernel);
+        // if (kernel_filename)
+        //         save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
+        // else
+        //         printf("Not saving result (no --output given)\n");
+        // free(kernel);
         exit(EXIT_SUCCESS);
 }
