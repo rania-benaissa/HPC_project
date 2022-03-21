@@ -521,14 +521,12 @@ void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 
         /* compute the n x n matrix c */
         u32 c[n * n];
         u32 spliced[n * n];
-
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
                 {
                         spliced[i * n + j] = d[j] ? vtAAv[i * n + j] : vtAv[i * n + j];
                         c[i * n + j] = 0;
                 }
-
         matmul_CpAB(c, winv, spliced);
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
@@ -903,12 +901,12 @@ void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datat
 }
 
 // parallel M * x
-u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int n, int transpose, int nb_processus)
+u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int n, int transpose)
 {
 
         int nrows = transpose ? M_processus.nrows : M_processus.ncols;
 
-        int step = nrows % nb_processus;
+        int step = nrows % n;
 
         // fprintf(stderr, "nrows %d\n", n * nrows);
         u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * (nrows + step)));
@@ -977,23 +975,21 @@ u32 *gatherFinalV(u32 *v_processus, int processus_ncols, int ncols, int my_rank,
 
                 v = malloc((ncols * n) * sizeof(*v));
 
-                int receivCounts[nb_processus];
+                int recevCounts[nb_processus];
 
                 int displs[nb_processus];
 
                 for (int proc = 0; proc < nb_processus; proc++)
                 {
-                        receivCounts[proc] = (proc == nb_processus - 1) ? n * (processus_ncols + (ncols % nb_processus)) : n * processus_ncols;
-
+                        recevCounts[proc] = (proc == nb_processus - 1) ? n * (processus_ncols + (ncols % nb_processus)) : n * processus_ncols;
                         displs[proc] = proc * n * processus_ncols;
                 }
 
-                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, v, receivCounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, v, recevCounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
         }
         else
         {
-
-                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, NULL, NULL, NULL, NULL, 0, MPI_COMM_WORLD);
+                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, NULL, NULL, NULL, MPI_INT, 0, MPI_COMM_WORLD);
         }
 
         return v;
@@ -1037,7 +1033,7 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
 
         // same size as tmp_processus
-        u32 *p = malloc(sizeof(*p) * (n * (M_processus.nrows + (M_processus.nrows % nb_processus))));
+        u32 *p = malloc(sizeof(*p) * (n * (M_processus.nrows + (M_processus.nrows % n))));
 
         u32 *tmp_processus = NULL;
         u32 *Av_processus = NULL;
@@ -1066,10 +1062,10 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
                         break;
 
                 /*tmp = M * v(equivalent en tTD de y = M x)*/
-                tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, n, transpose, nb_processus);
+                tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, n, transpose);
 
                 /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
-                Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, n, !transpose, nb_processus);
+                Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, n, !transpose);
 
                 // bloc bloc B  = vt*Av = (xt * z ) / A = vt*A*Av
                 computeBlockProduct(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
