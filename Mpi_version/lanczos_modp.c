@@ -1033,7 +1033,7 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
 
         // same size as tmp_processus
-        u32 *p = malloc(sizeof(*p) * (n * (M_processus.ncols)));
+        u32 *p = malloc(sizeof(*p) * (n * (M_processus.nrows + (M_processus.nrows % n))));
 
         u32 *tmp_processus = NULL;
         u32 *Av_processus = NULL;
@@ -1058,7 +1058,6 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         while (true)
         {
-
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
@@ -1086,16 +1085,17 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
                 for (long i = 0; i < M_processus.ncols * n; i++)
                         v_processus[i] = tmp_processus[i];
 
-                verbosity();
+                if (my_rank == 0)
+                        verbosity();
         }
 
         if (stop_after < 0 && my_rank == 0)
                 final_check(M_processus.ncols, M_processus.nrows, v_processus, tmp_processus);
 
         printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-        // free(tmp_processus);
-        // free(Av_processus);
-        // free(p);
+        free(tmp_processus);
+        free(Av_processus);
+        free(p);
 
         u32 *v = gatherFinalV(v_processus, M_processus.ncols, M.ncols, my_rank, nb_processus);
 
@@ -1126,7 +1126,7 @@ int main(int argc, char **argv)
         if (my_rank == 0)
                 sparsematrix_mm_load(&M, matrix_filename);
 
-        // // coeur du travail
+        // coeur du travail
         u32 *kernel = block_lanczos(M, n, right_kernel, my_rank, nb_processus);
 
         if (my_rank == 0)
