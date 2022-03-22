@@ -680,7 +680,7 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
                 stop = (semi_inverse(vtAv, winv, d) == 0);
 
                 /* check that everything is working ; disable in production */
-                // correctness_tests(vtAv, vtAAv, winv, d);
+                correctness_tests(vtAv, vtAAv, winv, d);
 
                 if (stop)
                         break;

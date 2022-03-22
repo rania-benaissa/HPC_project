@@ -17,7 +17,7 @@ n = nb colonnes de xi
 
 $ ./lanczos_modp --matrix ../TF16/TF16.mtx --prime 65537 --right --n 2 --output kernel.mtx
 
-
+./lanczos_modp --matrix ../TF17/TF17.mtx --prime 65537 --right --n 2 --output kernel.mtx
 $ mpiexec --hostfile $OAR_NODEFILE ./lanczos_modp --matrix ../TF17/TF17.mtx --prime 65537 --right --n 2 --output kernel.mtx
 
 

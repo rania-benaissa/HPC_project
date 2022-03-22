@@ -837,12 +837,12 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
                 for (int proc = 0; proc < nb_processus; proc++)
                 {
                         step = (proc == nb_processus - 1) ? (nrows % nb_processus) : 0;
-                        sendCounts[proc] = (n * (ncols_processus + n * step));
+                        sendCounts[proc] = (n * (ncols_processus + (n * step)));
                         displs[proc] = proc * (n * ncols_processus);
                 }
 
                 // on subdivise les données
-                MPI_Scatterv(v, sendCounts, displs, MPI_INT, v_processus, n * ncols_processus, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(v, sendCounts, displs, MPI_UINT32_T, v_processus, n * ncols_processus, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
 
         else
@@ -854,7 +854,7 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
 
                 v_processus = malloc(sizeof(*v_processus) * receive_size);
 
-                MPI_Scatterv(NULL, NULL, NULL, MPI_INT, v_processus, receive_size, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Scatterv(NULL, NULL, NULL, MPI_UINT32_T, v_processus, receive_size, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
         // if (my_rank == nb_processus - 1)
         //  {
@@ -894,8 +894,8 @@ void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datat
 {
         // MUTE THAT PARAMETER è.é
         (void)datatype;
-        int *input = (int *)inputBuffer;
-        int *output = (int *)outputBuffer;
+        u32 *input = (u32 *)inputBuffer;
+        u32 *output = (u32 *)outputBuffer;
 
         for (int i = 0; i < *len; i++)
         {
@@ -904,16 +904,12 @@ void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datat
 }
 
 // parallel M * x
-u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_processus, int step, int n, int transpose)
+void computeMatrixVectorProduct(u32 *tmp_processus, struct sparsematrix_t const M_processus, u32 *v_processus, int step, int n, int transpose)
 {
 
         int nrows = transpose ? M_processus.nrows : M_processus.ncols;
 
-        // int step = rows % nb_processus;
-
         // fprintf(stderr, "nrows %d\n", n * nrows);
-
-        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * (nrows + step)));
 
         int size = n * (nrows + step);
 
@@ -929,23 +925,22 @@ u32 *computeMatrixVectorProduct(struct sparsematrix_t const M_processus, u32 *v_
         // si on calcule la 1ere multiplication
         if (transpose == 1)
         {
-                u32 *tmp = malloc(sizeof(*tmp_processus) * (n * (nrows + step)));
+                u32 *tmp = malloc(sizeof(*tmp_processus) * size);
 
                 // Create the operation
                 MPI_Op operation;
 
                 MPI_Op_create(&sumMod, 1, &operation);
 
-                MPI_Allreduce(tmp_processus, tmp, (n * (nrows + step)), MPI_INT, operation, MPI_COMM_WORLD);
+                MPI_Allreduce(tmp_processus, tmp, size, MPI_UINT32_T, operation, MPI_COMM_WORLD);
 
                 MPI_Op_free(&operation);
 
-                tmp_processus = tmp;
+                for (int i = 0; i < size; i++)
+                {
+                        tmp_processus[i] = tmp[i];
+                }
         }
-
-        // si c est la deuxieme on la retourne direct
-
-        return tmp_processus;
 }
 
 // paralell x*x
@@ -962,22 +957,19 @@ void computeBlockProduct(u32 *vtAv_processus, u32 *vtAAv_processus, int ncols, u
         MPI_Op operation;
         MPI_Op_create(&sumMod, 1, &operation);
 
-        MPI_Allreduce(vtAv_tmp, vtAv_processus, n * n, MPI_INT, operation, MPI_COMM_WORLD);
+        MPI_Allreduce(vtAv_tmp, vtAv_processus, n * n, MPI_UINT32_T, operation, MPI_COMM_WORLD);
 
-        MPI_Allreduce(vtAAv_tmp, vtAAv_processus, n * n, MPI_INT, operation, MPI_COMM_WORLD);
+        MPI_Allreduce(vtAAv_tmp, vtAAv_processus, n * n, MPI_UINT32_T, operation, MPI_COMM_WORLD);
 
         MPI_Op_free(&operation);
 }
 
 // gather the final result of V
-u32 *gatherFinalV(u32 *v_processus, int processus_ncols, int ncols, int my_rank, int nb_processus)
+void gatherFinalV(u32 *v, u32 *v_processus, int processus_ncols, int ncols, int my_rank, int nb_processus)
 {
-        u32 *v = NULL;
 
         if (my_rank == 0)
         {
-
-                v = malloc((ncols * n) * sizeof(*v));
 
                 int recevCounts[nb_processus];
 
@@ -990,14 +982,12 @@ u32 *gatherFinalV(u32 *v_processus, int processus_ncols, int ncols, int my_rank,
                         displs[proc] = proc * n * processus_ncols;
                 }
 
-                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, v, recevCounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Gatherv(v_processus, n * processus_ncols, MPI_UINT32_T, v, recevCounts, displs, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
         else
         {
-                MPI_Gatherv(v_processus, n * processus_ncols, MPI_INT, NULL, NULL, NULL, MPI_INT, 0, MPI_COMM_WORLD);
+                MPI_Gatherv(v_processus, n * processus_ncols, MPI_UINT32_T, NULL, NULL, NULL, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
-
-        return v;
 }
 
 /**************************** dense vector block IO ************************/
@@ -1030,7 +1020,7 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         // ça c est le nombre de colonnes en vrai
         int nrows = getNrows(M, transpose, my_rank);
 
-        fprintf(stderr, "nrows  = %d\n", nrows);
+        // fprintf(stderr, "nrows  = %d\n", nrows);
 
         /************* main loop *************/
 
@@ -1039,22 +1029,29 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
 
-        int size = (n * ((nrows / nb_processus) + n * (nrows % nb_processus)));
+        u32 vtAv_processus[n * n];
+        u32 vtAAv_processus[n * n];
+        u32 winv[n * n];
+        u32 d[n];
+
+        int step = (my_rank == nb_processus - 1) ? (nrows % nb_processus) : 0;
+
+        int v_size = M_processus.ncols * n;
+
+        int size = (n * (M_processus.nrows + n * step));
+
+        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * (M_processus.nrows + (nrows % nb_processus))));
+        u32 *Av_processus = malloc(sizeof(*Av_processus) * (n * (M_processus.ncols + (nrows % nb_processus))));
 
         // same size as av
         u32 *p = malloc(sizeof(*p) * size);
+
+        u32 *v = malloc((nrows * n) * sizeof(*v));
 
         for (int i = 0; i < size; i++)
         {
                 p[i] = 0;
         }
-
-        u32 *tmp_processus = NULL;
-        u32 *Av_processus = NULL;
-        u32 vtAv_processus[n * n];
-        u32 vtAAv_processus[n * n];
-        u32 winv[n * n];
-        u32 d[n];
 
         if (my_rank == 0)
         {
@@ -1071,14 +1068,15 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         while (true)
         {
+
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
                 /*tmp = M * v(equivalent en tTD de y = M x)*/
-                tmp_processus = computeMatrixVectorProduct(M_processus, v_processus, nrows % nb_processus, n, transpose);
+                computeMatrixVectorProduct(tmp_processus, M_processus, v_processus, nrows % nb_processus, n, transpose);
 
                 /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
-                Av_processus = computeMatrixVectorProduct(M_processus, tmp_processus, nrows % nb_processus, n, !transpose);
+                computeMatrixVectorProduct(Av_processus, M_processus, tmp_processus, nrows % nb_processus, n, !transpose);
 
                 // bloc bloc B  = vt*Av = (xt * z ) / A = vt*A*Av
                 computeBlockProduct(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
@@ -1093,11 +1091,11 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
                         break;
 
-                // so the new version of v is in tmp
+                //  so the new version of v is in tmp
                 orthogonalize(v_processus, tmp_processus, p, d, vtAv_processus, vtAAv_processus, winv, M_processus.ncols, Av_processus);
 
                 // we copy tmp in v
-                for (long i = 0; i < M_processus.ncols * n; i++)
+                for (long i = 0; i < v_size; i++)
                         v_processus[i] = tmp_processus[i];
 
                 if (my_rank == 0)
@@ -1108,11 +1106,12 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
                 final_check(M_processus.ncols, M_processus.nrows, v_processus, tmp_processus);
 
         printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-        free(tmp_processus);
-        free(Av_processus);
-        free(p);
 
-        u32 *v = gatherFinalV(v_processus, M_processus.ncols, M.ncols, my_rank, nb_processus);
+        // free(tmp_processus);
+        // free(Av_processus);
+        // free(p);
+
+        gatherFinalV(v, v_processus, M_processus.ncols, nrows, my_rank, nb_processus);
 
         return v; // x
 }
@@ -1151,9 +1150,9 @@ int main(int argc, char **argv)
                         save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
                 else
                         printf("Not saving result (no --output given)\n");
-        }
 
-        free(kernel);
+                free(kernel);
+        }
 
         MPI_Finalize();
         exit(EXIT_SUCCESS);
