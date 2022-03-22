@@ -1,5 +1,5 @@
-CFLAGS = -std=c99 -g -Wall -pg -Wextra -Werror -O3 -march=native -I.
-LDFLAGS = -pg
+CFLAGS = -std=c99 -g -Wall -Wextra -Werror -O3 -march=native -I.
+LDFLAGS =
 
 # Uncomment these for OpenMP
 #CFLAGS += -fopenmp

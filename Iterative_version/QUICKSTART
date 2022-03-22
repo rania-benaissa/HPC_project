@@ -11,7 +11,7 @@ $ tar xzf TF16.tar.gz
 Calcul de vecteurs du noyau (Ax == 0)
 -------------------------------------
 
-$ ./lanczos_modp --matrix TF16/TF16.mtx --prime 65537 --right --n 2 --output kernel.mtx
+$ ./lanczos_modp --matrix ../TF16/TF16.mtx --prime 65537 --right --n 2 --output kernel.mtx
 
 
 

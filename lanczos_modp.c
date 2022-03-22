@@ -44,6 +44,7 @@ int stop_after = -1;
 
 int n_iterations; /* variables of the "verbosity engine" */
 double start;
+double end;
 double last_print;
 bool ETA_flag;
 int expected_iterations;
@@ -698,41 +699,42 @@ void block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         /************* main loop *************/
         printf("  - Main loop\n");
         start = wtime();
-        // bool stop = false;
+        bool stop = false;
 
-        // while (true)
-        // {
+        while (true)
+        {
 
-        //         if (stop_after > 0 && n_iterations == stop_after)
-        //                 break;
+                if (stop_after > 0 && n_iterations == stop_after)
+                        break;
 
-        sparse_matrix_vector_product(tmp, M, v, !transpose);
+                sparse_matrix_vector_product(tmp, M, v, !transpose);
 
-        sparse_matrix_vector_product(Av, M, tmp, transpose);
+                sparse_matrix_vector_product(Av, M, tmp, transpose);
 
-        u32 vtAv[n * n];
-        u32 vtAAv[n * n];
+                u32 vtAv[n * n];
+                u32 vtAAv[n * n];
 
-        block_dot_products(vtAv, vtAAv, nrows, Av, v);
+                block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
-        u32 winv[n * n];
-        u32 d[n];
-        // stop = (semi_inverse(vtAv, winv, d) == 0);
+                u32 winv[n * n];
+                u32 d[n];
+                stop = (semi_inverse(vtAv, winv, d) == 0);
 
-        /* check that everything is working ; disable in production */
-        // correctness_tests(vtAv, vtAAv, winv, d);
+                /* check that everything is working ; disable in production */
+                // correctness_tests(vtAv, vtAAv, winv, d);
 
-        // if (stop)
-        //         break;
+                if (stop)
+                        break;
 
-        orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
+                orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
 
-        /* the next value of v is in tmp ; copy */
-        for (long i = 0; i < block_size; i++)
-                v[i] = tmp[i];
+                /* the next value of v is in tmp ; copy */
+                for (long i = 0; i < block_size; i++)
+                        v[i] = tmp[i];
 
-        verbosity();
-        //}
+                verbosity();
+        }
+        end = wtime();
 
         // FILE *f = fopen("check.mtx", "a+");
         // for (int u = 0; u < block_size; u++)
@@ -743,22 +745,14 @@ void block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
         // printf("\n");
 
-        // if (stop_after < 0)
-        //         final_check(nrows, ncols, v, tmp);
-        // printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
-        // free(tmp);
-        // free(Av);
-        // free(p);
+        if (stop_after < 0)
+                final_check(nrows, ncols, v, tmp);
+
+        printf("  - Terminated in %.1fs after %d iterations\n", end - start, n_iterations);
+        free(tmp);
+        free(Av);
+        free(p);
         // return v;
-
-        FILE *f = fopen("check.mtx", "a+");
-
-        for (long u = 0; u < block_size_pad; u++)
-        {
-                fprintf(f, "%d \n", v[u]);
-        }
-
-        fclose(f);
 }
 
 /**************************** dense vector block IO ************************/
@@ -787,7 +781,18 @@ int main(int argc, char **argv)
         struct sparsematrix_t M;
         sparsematrix_mm_load(&M, matrix_filename);
 
-        /*u32 *kernel = */ block_lanczos(&M, n, right_kernel);
+        int nbr[5] = {2, 50, 100, 1000, 10000};
+
+        FILE *f = fopen("check.mtx", "a+");
+        for (int i = 0; i < 5; i++)
+        {
+
+                /*u32 *kernel = */ block_lanczos(&M, n, right_kernel);
+
+                fprintf(f, "%f %d\n", end - start, nbr[i]);
+        }
+
+        fclose(f);
 
         // if (kernel_filename)
         //         save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
