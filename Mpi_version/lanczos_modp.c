@@ -782,8 +782,15 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
 }
 
 // cree le vecteur V
-u32 *createV(int block_size, int block_size_pad)
+u32 *createV(int nrows, int ncols)
 {
+        long block_size = nrows * n;
+        // division entiere
+        long Npad = ((nrows + n - 1) / n) * n;
+
+        long Mpad = ((ncols + n - 1) / n) * n;
+
+        long block_size_pad = (Npad > Mpad ? Npad : Mpad) * n;
 
         u32 *v = malloc(sizeof(*v) * block_size_pad);
 
@@ -801,16 +808,9 @@ u32 *createV(int block_size, int block_size_pad)
 }
 
 // subdivise le vecteur v
-u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
+u32 *subdiviseV(int nrows, int ncols, int n, int nb_processus, int my_rank)
 {
         // the bloc size should
-
-        long block_size = nrows * n;
-        // division entiere
-        long Npad = ((nrows + n - 1) / n) * n;
-
-        // ça c est la taille de mon v
-        long block_size_pad = Npad * n;
 
         int ncols_processus = nrows / nb_processus;
 
@@ -822,11 +822,13 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
         {
 
                 // partie creation
-                u32 *v = createV(block_size, block_size_pad);
+                u32 *v = createV(nrows, ncols);
+
+                int size = (n * ncols_processus);
 
                 // le processus 0 garde son vecteur v
 
-                v_processus = malloc(sizeof(*v_processus) * (n * ncols_processus));
+                v_processus = malloc(sizeof(*v_processus) * size);
 
                 int sendCounts[nb_processus];
 
@@ -838,7 +840,7 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
                 {
                         step = (proc == nb_processus - 1) ? (nrows % nb_processus) : 0;
                         sendCounts[proc] = (n * (ncols_processus + (n * step)));
-                        displs[proc] = proc * (n * ncols_processus);
+                        displs[proc] = proc * size;
                 }
 
                 // on subdivise les données
@@ -854,21 +856,24 @@ u32 *subdiviseV(int nrows, int n, int nb_processus, int my_rank)
 
                 v_processus = malloc(sizeof(*v_processus) * receive_size);
 
+                // for (int i = 0; i < receive_size; i++)
+                // {
+                //         v_processus[i] = 0;
+                // }
+
                 MPI_Scatterv(NULL, NULL, NULL, MPI_UINT32_T, v_processus, receive_size, MPI_UINT32_T, 0, MPI_COMM_WORLD);
         }
         // if (my_rank == nb_processus - 1)
-        //  {
-        //          FILE *f = fopen("v0_check.mtx", "a+");
+        // {
+        //         FILE *f = fopen("v0_check.mtx", "a+");
 
-        //         for (int u = 0; u < n * (ncols_processus + step); u++)
+        //         for (int u = 0; u < receive_size; u++)
         //         {
         //                 fprintf(f, "%d \n", v_processus[u]);
         //         }
 
         //         fclose(f);
         // }
-
-        //
 
         return v_processus;
 }
@@ -925,7 +930,12 @@ void computeMatrixVectorProduct(u32 *tmp_processus, struct sparsematrix_t const 
         // si on calcule la 1ere multiplication
         if (transpose == 1)
         {
-                u32 *tmp = malloc(sizeof(*tmp_processus) * size);
+                u32 *tmp = malloc(sizeof(*tmp) * size);
+
+                for (int i = 0; i < size; i++)
+                {
+                        tmp[i] = 0;
+                }
 
                 // Create the operation
                 MPI_Op operation;
@@ -1027,7 +1037,7 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
         // je subdivise M first
         struct sparsematrix_t M_processus = subdiviseM(M, nb_processus, my_rank);
 
-        u32 *v_processus = subdiviseV(nrows, n, nb_processus, my_rank);
+        u32 *v_processus = subdiviseV(nrows, M.ncols, n, nb_processus, my_rank);
 
         u32 vtAv_processus[n * n];
         u32 vtAAv_processus[n * n];
@@ -1107,9 +1117,9 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, bool transpose, int my_
 
         printf("  - Terminated in %.1fs after %d iterations\n", wtime() - start, n_iterations);
 
-        // free(tmp_processus);
-        // free(Av_processus);
-        // free(p);
+        free(tmp_processus);
+        free(Av_processus);
+        free(p);
 
         gatherFinalV(v, v_processus, M_processus.ncols, nrows, my_rank, nb_processus);
 

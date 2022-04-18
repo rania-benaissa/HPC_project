@@ -45,7 +45,6 @@ int stop_after = -1;
 
 int n_iterations; /* variables of the "verbosity engine" */
 double start;
-double end;
 double last_print;
 bool ETA_flag;
 int expected_iterations;
@@ -693,8 +692,6 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
                 verbosity();
         }
-
-        end = wtime();
         printf("\n");
 
         if (stop_after < 0)
@@ -732,21 +729,7 @@ int main(int argc, char **argv)
         struct sparsematrix_t M;
         sparsematrix_mm_load(&M, matrix_filename);
 
-        u32 *kernel;
-
-        int nbr[5] = {2, 50, 100, 500};
-
-        FILE *f = fopen("check.mtx", "a+");
-        for (int i = 0; i < 5; i++)
-        {
-                n = nbr[i];
-
-                kernel = block_lanczos(&M, n, right_kernel);
-
-                fprintf(f, "%f %d\n", end - start, nbr[i]);
-        }
-
-        fclose(f);
+        u32 *kernel = block_lanczos(&M, n, right_kernel);
 
         if (kernel_filename)
                 save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
