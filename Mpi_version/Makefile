@@ -8,7 +8,7 @@ LDFLAGS = -pg
 
 all: lanczos_modp checker_modp
 lanczos_modp: mmio.o lanczos_modp.o 
-lanczos_modp.o: lanczos_modp.c mmio.h
+lanczos_modp.o: lanczos_modp.c mmio.h 
 checker_modp:   mmio.o checker_modp.o
 checker_modp.o: checker_modp.c mmio.h
 

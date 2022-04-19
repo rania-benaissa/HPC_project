@@ -297,8 +297,6 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                 y[i] = 0;
         }
 
-        // FILE *f = fopen("check.mtx", "a+");
-
         for (long k = 0; k < nnz; k++)
         {
                 int i = transpose ? Mj[k] : Mi[k];
@@ -310,12 +308,8 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
                         u64 a = y[i * n + l];
                         u64 b = x[j * n + l];
                         y[i * n + l] = (a + v * b) % prime;
-
-                        // fprintf(f, "i= %d, j = %d, tmp[%ld],v[%ld], tmp = %ld,v=%ld\n", i, j, i * n + l, j * n + l, a, b);
                 }
         }
-
-        // fclose(f);
 }
 
 /****************** dense linear algebra modulo p *************************/
@@ -500,19 +494,12 @@ void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
-        {
-
                 matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
-        }
 
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
-
         for (int i = 0; i < N; i += n)
-        {
-
                 matmul_CpAtB(vtAAv, &Av[i * n], &Av[i * n]);
-        }
 }
 
 /* Compute the next values of v (in tmp) and p */
@@ -804,7 +791,7 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
 }
 
 // cree le vecteur V
-u32 *createV(int ncols)
+u32 *createV(int ncols, int nrows)
 {
         // fprintf(stderr, "nrows = %d", nrows);
         // fprintf(stderr, "ncols= %d", ncols);
@@ -813,7 +800,9 @@ u32 *createV(int ncols)
         // division entiere
         long pad = ((ncols + n - 1) / n) * n;
 
-        long block_size_pad = pad * n;
+        long Mpad = ((nrows + n - 1) / n) * n;
+
+        long block_size_pad = (pad > Mpad ? pad : Mpad) * n;
 
         u32 *v = malloc(sizeof(*v) * block_size_pad);
 
@@ -831,7 +820,7 @@ u32 *createV(int ncols)
 }
 
 // subdivise le vecteur v
-u32 *subdiviseV(int ncols, int n, int nb_processus, int my_rank)
+u32 *subdiviseV(int ncols, int nrows, int n, int nb_processus, int my_rank)
 {
         // the bloc size should
 
@@ -845,7 +834,7 @@ u32 *subdiviseV(int ncols, int n, int nb_processus, int my_rank)
         {
 
                 // partie creation
-                u32 *v = createV(ncols);
+                u32 *v = createV(ncols, nrows);
 
                 int size = (n * ncols_processus);
 
@@ -862,12 +851,14 @@ u32 *subdiviseV(int ncols, int n, int nb_processus, int my_rank)
                 for (int proc = 0; proc < nb_processus; proc++)
                 {
                         step = (proc == nb_processus - 1) ? (ncols % nb_processus) : 0;
-                        sendCounts[proc] = (n * (ncols_processus + (n * step)));
+                        sendCounts[proc] = (n * (ncols_processus + step));
                         displs[proc] = proc * size;
                 }
 
                 // on subdivise les données
                 MPI_Scatterv(v, sendCounts, displs, MPI_UINT32_T, v_processus, n * ncols_processus, MPI_UINT32_T, 0, MPI_COMM_WORLD);
+
+                free(v);
         }
 
         else
@@ -875,7 +866,7 @@ u32 *subdiviseV(int ncols, int n, int nb_processus, int my_rank)
 
                 step = (my_rank == nb_processus - 1) ? (ncols % nb_processus) : 0;
 
-                int receive_size = (n * (ncols_processus + n * step));
+                int receive_size = (n * (ncols_processus + step));
 
                 v_processus = malloc(sizeof(*v_processus) * receive_size);
 
@@ -920,28 +911,27 @@ void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datat
         u32 *input = (u32 *)inputBuffer;
         u32 *output = (u32 *)outputBuffer;
 
+        u64 out;
+
         for (int i = 0; i < *len; i++)
         {
 
-                output[i] = (output[i] + input[i]) % prime;
+                out = ((u64)output[i] + (u64)input[i]) % prime;
+                // output[i] = (output[i] + input[i]) % prime;
+
+                output[i] = (u32)out;
         }
 }
 
 // parallel M * x
-void computeMatrixVectorProduct(u32 *tmp_processus, struct sparsematrix_t const M_processus, u32 *v_processus, int step, int n, int transpose)
+void computeMatrixVectorProduct(u32 *tmp_processus, struct sparsematrix_t const M_processus, u32 *v_processus, int n, int transpose)
 {
 
         int nrows = transpose ? M_processus.nrows : M_processus.ncols;
 
         // fprintf(stderr, "nrows %d\n", n * nrows);
 
-        int size = n * (nrows + step);
-
-        // here i added some padding
-        for (int i = 0; i < size; i++)
-        {
-                tmp_processus[i] = 0;
-        }
+        int size = n * nrows;
 
         // chaque processeur calcul la matrice qu'il a
         sparse_matrix_vector_product(tmp_processus, &M_processus, v_processus, !transpose);
@@ -1049,46 +1039,45 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, int my_rank, int nb_pro
 
         /************* preparations **************/
 
-        /* allocate blocks of vectors */
-
-        // ça c est le nombre de colonnes en vrai
         int ncols = getCols(M, my_rank);
 
-        // fprintf(stderr, "ncols  = %d\n", ncols);
-
-        /************* main loop *************/
-
         // je subdivise M first
-
-        // fprintf(stderr, "Subdivise M %d\n", my_rank);
         struct sparsematrix_t M_processus = subdiviseM(M, nb_processus, my_rank);
 
-        // fprintf(stderr, "Subdivise V %d\n", my_rank);
+        // je subdivise V
+        u32 *v_processus = subdiviseV(ncols, M.nrows, n, nb_processus, my_rank);
 
-        u32 *v_processus = subdiviseV(ncols, n, nb_processus, my_rank);
-
+        /*********** declarations ***********/
         u32 vtAv_processus[n * n];
         u32 vtAAv_processus[n * n];
         u32 winv[n * n];
         u32 d[n];
 
-        int step = (my_rank == nb_processus - 1) ? (ncols % nb_processus) : 0;
-
         int v_size = M_processus.ncols * n;
 
-        int size = (n * (M_processus.nrows + (n * step)));
+        bool stop = false;
 
-        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (n * (M_processus.nrows + (ncols % nb_processus))));
-        u32 *Av_processus = malloc(sizeof(*Av_processus) * (n * (M_processus.ncols + (ncols % nb_processus))));
+        //  division entiere
+        long pad = ((ncols + n - 1) / n) * n;
 
-        // same size as av
-        u32 *p = malloc(sizeof(*p) * size);
+        long Mpad = ((M_processus.nrows + n - 1) / n) * n;
 
+        long block_size_pad = (pad > Mpad ? pad : Mpad) * n;
+
+        u32 *tmp_processus = malloc(sizeof(*tmp_processus) * (block_size_pad));
+        u32 *Av_processus = malloc(sizeof(*Av_processus) * (block_size_pad));
+        u32 *p = malloc(sizeof(*p) * block_size_pad);
+
+        // will contain the final v
         u32 *v = malloc((ncols * n) * sizeof(*v));
 
-        for (int i = 0; i < size; i++)
+        /*********** initialisations ***********/
+
+        for (int i = 0; i < block_size_pad; i++)
         {
                 p[i] = 0;
+                tmp_processus[i] = 0;
+                Av_processus[i] = 0;
         }
 
         if (my_rank == 0)
@@ -1100,23 +1089,19 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, int my_rank, int nb_pro
                 printf("  - Expecting %s iterations\n", human_its);
         }
 
-        bool stop = false;
-
         start = wtime();
 
         while (true)
         {
-
                 if (stop_after > 0 && n_iterations == stop_after)
                         break;
 
-                // fprintf(stderr, "Matrix vect 1 %d\n", my_rank);
                 /*tmp = M * v(equivalent en tTD de y = M x)*/
-                computeMatrixVectorProduct(tmp_processus, M_processus, v_processus, ncols % nb_processus, n, 1);
+                computeMatrixVectorProduct(tmp_processus, M_processus, v_processus, n, 1);
 
-                // fprintf(stderr, "Matrix vect 2 %d\n", my_rank);
                 /* Av = M *tmp  (equivalent en td de z = Mtransposé *y)*/
-                computeMatrixVectorProduct(Av_processus, M_processus, tmp_processus, ncols % nb_processus, n, 0);
+                computeMatrixVectorProduct(Av_processus, M_processus, tmp_processus, n, 0);
+
                 // fprintf(stderr, "block block %d\n", my_rank);
                 //  bloc bloc B  = vt*Av = (xt * z ) / A = vt*A*Av
                 computeBlockProduct(vtAv_processus, vtAAv_processus, M_processus.ncols, Av_processus, v_processus);
@@ -1125,14 +1110,12 @@ u32 *block_lanczos(struct sparsematrix_t const M, int n, int my_rank, int nb_pro
                 stop = (semi_inverse(vtAv_processus, winv, d) == 0);
 
                 /* check that everything is working ; disable in production */
-                // fprintf(stderr, "check correctness %d\n", my_rank);
                 // correctness_tests(vtAv_processus, vtAAv_processus, winv, d);
 
                 if (stop)
 
                         break;
 
-                // fprintf(stderr, "ortho %d\n", my_rank);
                 //   so the new version of v is in tmp
                 orthogonalize(v_processus, tmp_processus, p, d, vtAv_processus, vtAAv_processus, winv, M_processus.ncols, Av_processus);
 
@@ -1188,6 +1171,7 @@ int main(int argc, char **argv)
                 if (!right_kernel)
                         transposeMatrix(&M);
         }
+
         // i always sort it according to columns thanks to transposeMatrix !
         // sortMatrix(&M);
 
