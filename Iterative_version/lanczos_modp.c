@@ -1,10 +1,10 @@
-/*
+/* 
  * Sequential implementation of the Block-Lanczos algorithm.
  *
- * This is based on the paper:
- *     "A modified block Lanczos algorithm with fewer vectors"
+ * This is based on the paper: 
+ *     "A modified block Lanczos algorithm with fewer vectors" 
  *
- *  by Emmanuel Thomé, available online at
+ *  by Emmanuel Thomé, available online at 
  *      https://hal.inria.fr/hal-01293351/document
  *
  * Authors : Charles Bouillaguet
@@ -12,11 +12,11 @@
  * v1.00 (2022-01-18)
  * v1.01 (2022-03-13) bugfix with (non-transposed) matrices that have more columns than rows
  *
- * USAGE:
+ * USAGE: 
  *      $ ./lanczos_modp --prime 65537 --n 4 --matrix random_small.mtx
  *
  */
-#define _POSIX_C_SOURCE 1 // ctime
+#define _POSIX_C_SOURCE  1  // ctime
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -43,7 +43,7 @@ char *kernel_filename;
 bool right_kernel = false;
 int stop_after = -1;
 
-int n_iterations; /* variables of the "verbosity engine" */
+int n_iterations;      /* variables of the "verbosity engine" */
 double start;
 double last_print;
 bool ETA_flag;
@@ -51,14 +51,13 @@ int expected_iterations;
 
 /******************* sparse matrix data structure **************/
 
-struct sparsematrix_t
-{
-        int nrows; // dimensions
+struct sparsematrix_t {
+        int nrows;        // dimensions
         int ncols;
-        long int nnz; // number of non-zero coefficients
-        int *i;       // row indices (for COO matrices)
-        int *j;       // column indices
-        u32 *x;       // coefficients
+        long int nnz;     // number of non-zero coefficients
+        int *i;           // row indices (for COO matrices)
+        int *j;           // column indices
+        u32 *x;           // coefficients
 };
 
 /******************* pseudo-random generator (xoshiro256+) ********************/
@@ -92,34 +91,28 @@ double wtime()
 {
         struct timeval ts;
         gettimeofday(&ts, NULL);
-        return (double)ts.tv_sec + ts.tv_usec / 1e6;
+        return (double) ts.tv_sec + ts.tv_usec / 1e6;
 }
 
 /* represent n in <= 6 char  */
-void human_format(char *target, long n)
-{
-        if (n < 1000)
-        {
+void human_format(char * target, long n) {
+        if (n < 1000) {
                 sprintf(target, "%" PRId64, n);
                 return;
         }
-        if (n < 1000000)
-        {
+        if (n < 1000000) {
                 sprintf(target, "%.1fK", n / 1e3);
                 return;
         }
-        if (n < 1000000000)
-        {
+        if (n < 1000000000) {
                 sprintf(target, "%.1fM", n / 1e6);
                 return;
         }
-        if (n < 1000000000000ll)
-        {
+        if (n < 1000000000000ll) {
                 sprintf(target, "%.1fG", n / 1e9);
                 return;
         }
-        if (n < 1000000000000000ll)
-        {
+        if (n < 1000000000000000ll) {
                 sprintf(target, "%.1fT", n / 1e12);
                 return;
         }
@@ -127,7 +120,7 @@ void human_format(char *target, long n)
 
 /************************** command-line options ****************************/
 
-void usage(char **argv)
+void usage(char ** argv)
 {
         printf("%s [OPTIONS]\n\n", argv[0]);
         printf("Options:\n");
@@ -144,22 +137,21 @@ void usage(char **argv)
         exit(0);
 }
 
-void process_command_line_options(int argc, char **argv)
+void process_command_line_options(int argc, char ** argv)
 {
         struct option longopts[8] = {
-            {"matrix", required_argument, NULL, 'm'},
-            {"prime", required_argument, NULL, 'p'},
-            {"n", required_argument, NULL, 'n'},
-            {"output-file", required_argument, NULL, 'o'},
-            {"right", no_argument, NULL, 'r'},
-            {"left", no_argument, NULL, 'l'},
-            {"stop-after", required_argument, NULL, 's'},
-            {NULL, 0, NULL, 0}};
+                {"matrix", required_argument, NULL, 'm'},
+                {"prime", required_argument, NULL, 'p'},
+                {"n", required_argument, NULL, 'n'},
+                {"output-file", required_argument, NULL, 'o'},
+                {"right", no_argument, NULL, 'r'},
+                {"left", no_argument, NULL, 'l'},
+                {"stop-after", required_argument, NULL, 's'},
+                {NULL, 0, NULL, 0}
+        };
         char ch;
-        while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1)
-        {
-                switch (ch)
-                {
+        while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
+                switch (ch) {
                 case 'm':
                         matrix_filename = optarg;
                         break;
@@ -193,8 +185,7 @@ void process_command_line_options(int argc, char **argv)
         if (kernel_filename != NULL && stop_after > 0)
                 usage(argv);
         /* range checking */
-        if (prime > 0x3fffffdd)
-        {
+        if (prime > 0x3fffffdd) {
                 errx(1, "p is capped at 2**30 - 35.  Slighly larger values could work, with the\n");
                 printf("suitable code modifications.\n");
                 exit(1);
@@ -204,7 +195,7 @@ void process_command_line_options(int argc, char **argv)
 /****************** sparse matrix operations ******************/
 
 /* Load a matrix from a file in "list of triplet" representation */
-void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
+void sparsematrix_mm_load(struct sparsematrix_t * M, char const * filename)
 {
         int nrows = 0;
         int ncols = 0;
@@ -222,11 +213,11 @@ void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
         if (mm_read_banner(f, &matcode) != 0)
                 errx(1, "Could not process Matrix Market banner.\n");
         if (!mm_is_matrix(matcode) || !mm_is_sparse(matcode))
-                errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)",
-                     mm_typecode_to_str(matcode));
+                errx(1, "Matrix Market type: [%s] not supported (only sparse matrices are OK)", 
+                        mm_typecode_to_str(matcode));
         if (!mm_is_general(matcode) || !mm_is_integer(matcode))
-                errx(1, "Matrix type [%s] not supported (only integer general are OK)",
-                     mm_typecode_to_str(matcode));
+                errx(1, "Matrix type [%s] not supported (only integer general are OK)", 
+                        mm_typecode_to_str(matcode));
         if (mm_read_mtx_crd_size(f, &nrows, &ncols, &nnz) != 0)
                 errx(1, "Cannot read matrix size");
         fprintf(stderr, "  - [%s] %d x %d with %ld nz\n", mm_typecode_to_str(matcode), nrows, ncols, nnz);
@@ -241,19 +232,17 @@ void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
 
         /* Parse and load actual entries */
         double start = wtime();
-        for (long u = 0; u < nnz; u++)
-        {
+        for (long u = 0; u < nnz; u++) {
                 int i, j;
                 u32 x;
                 if (3 != fscanf(f, "%d %d %d\n", &i, &j, &x))
                         errx(1, "parse error entry %ld\n", u);
-                Mi[u] = i - 1; /* MatrixMarket is 1-based */
+                Mi[u] = i - 1;  /* MatrixMarket is 1-based */
                 Mj[u] = j - 1;
                 Mx[u] = x % prime;
-
+                
                 // verbosity
-                if ((u & 0xffff) == 0xffff)
-                {
+                if ((u & 0xffff) == 0xffff) {
                         double elapsed = wtime() - start;
                         double percent = (100. * u) / nnz;
                         double rate = ftell(f) / 1048576. / elapsed;
@@ -272,25 +261,23 @@ void sparsematrix_mm_load(struct sparsematrix_t *M, char const *filename)
         M->x = Mx;
 }
 
-/* y += M*x or y += transpose(M)*x, according to the transpose flag */
-void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 const *x, bool transpose)
+/* y += M*x or y += transpose(M)*x, according to the transpose flag */ 
+void sparse_matrix_vector_product(u32 * y, struct sparsematrix_t const * M, u32 const * x, bool transpose)
 {
         long nnz = M->nnz;
         int nrows = transpose ? M->ncols : M->nrows;
-        int const *Mi = M->i;
-        int const *Mj = M->j;
-        u32 const *Mx = M->x;
-
+        int const * Mi = M->i;
+        int const * Mj = M->j;
+        u32 const * Mx = M->x;
+        
         for (long i = 0; i < nrows * n; i++)
                 y[i] = 0;
-
-        for (long k = 0; k < nnz; k++)
-        {
+                
+        for (long k = 0; k < nnz; k++) {
                 int i = transpose ? Mj[k] : Mi[k];
                 int j = transpose ? Mi[k] : Mj[k];
                 u64 v = Mx[k];
-                for (int l = 0; l < n; l++)
-                {
+                for (int l = 0; l < n; l++) {
                         u64 a = y[i * n + l];
                         u64 b = x[j * n + l];
                         y[i * n + l] = (a + v * b) % prime;
@@ -298,15 +285,14 @@ void sparse_matrix_vector_product(u32 *y, struct sparsematrix_t const *M, u32 co
         }
 }
 
-/****************** dense linear algebra modulo p *************************/
+/****************** dense linear algebra modulo p *************************/ 
 
 /* C += A*B   for n x n matrices */
-void matmul_CpAB(u32 *C, u32 const *A, u32 const *B)
+void matmul_CpAB(u32 * C, u32 const * A, u32 const * B)
 {
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
-                        for (int k = 0; k < n; k++)
-                        {
+                        for (int k = 0; k < n; k++) {
                                 u64 x = C[i * n + j];
                                 u64 y = A[i * n + k];
                                 u64 z = B[k * n + j];
@@ -315,12 +301,11 @@ void matmul_CpAB(u32 *C, u32 const *A, u32 const *B)
 }
 
 /* C += transpose(A)*B   for n x n matrices */
-void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
+void matmul_CpAtB(u32 * C, u32 const * A, u32 const * B)
 {
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
-                        for (int k = 0; k < n; k++)
-                        {
+                        for (int k = 0; k < n; k++) {
                                 u64 x = C[i * n + j];
                                 u64 y = A[k * n + i];
                                 u64 z = B[k * n + j];
@@ -331,93 +316,83 @@ void matmul_CpAtB(u32 *C, u32 const *A, u32 const *B)
 /* return a^(-1) mod b */
 u32 invmod(u32 a, u32 b)
 {
-        long int t = 0;
-        long int nt = 1;
-        long int r = b;
+        long int t = 0;  
+        long int nt = 1;  
+        long int r = b;  
         long int nr = a % b;
-        while (nr != 0)
-        {
+        while (nr != 0) {
                 long int q = r / nr;
-                long int tmp = nt;
-                nt = t - q * nt;
+                long int tmp = nt;  
+                nt = t - q*nt;  
                 t = tmp;
-                tmp = nr;
-                nr = r - q * nr;
+                tmp = nr;  
+                nr = r - q*nr;  
                 r = tmp;
         }
         if (t < 0)
                 t += b;
-        return (u32)t;
+        return (u32) t;
 }
 
-/*
+/* 
  * Given an n x n matrix U, compute a "partial-inverse" V and a diagonal matrix
  * d such that d*V == V*d == V and d == V*U*d. Return the number of pivots.
- */
-int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
+ */ 
+int semi_inverse(u32 const * M_, u32 * winv, u32 * d)
 {
         u32 M[n * n];
         int npiv = 0;
-        for (int i = 0; i < n * n; i++) /* copy M <--- M_ */
+        for (int i = 0; i < n * n; i++)   /* copy M <--- M_ */
                 M[i] = M_[i];
         /* phase 1: compute d */
-        for (int i = 0; i < n; i++) /* setup d */
+        for (int i = 0; i < n; i++)       /* setup d */
                 d[i] = 0;
-        for (int j = 0; j < n; j++)
-        { /* search a pivot on column j */
+        for (int j = 0; j < n; j++) {     /* search a pivot on column j */
                 int pivot = n;
                 for (int i = j; i < n; i++)
-                        if (M[i * n + j] != 0)
-                        {
+                        if (M[i*n + j] != 0) {
                                 pivot = i;
                                 break;
                         }
                 if (pivot >= n)
-                        continue; /* no pivot found */
+                        continue;         /* no pivot found */
                 d[j] = 1;
                 npiv += 1;
-                u64 pinv = invmod(M[pivot * n + j], prime); /* multiply pivot row to make pivot == 1 */
-                for (int k = 0; k < n; k++)
-                {
-                        u64 x = M[pivot * n + k];
-                        M[pivot * n + k] = (x * pinv) % prime;
+                u64 pinv = invmod(M[pivot*n + j], prime);  /* multiply pivot row to make pivot == 1 */
+                for (int k = 0; k < n; k++) {
+                        u64 x = M[pivot*n + k];
+                        M[pivot*n + k] = (x * pinv) % prime;
                 }
-                for (int k = 0; k < n; k++)
-                { /* swap pivot row with row j */
-                        u32 tmp = M[j * n + k];
-                        M[j * n + k] = M[pivot * n + k];
-                        M[pivot * n + k] = tmp;
+                for (int k = 0; k < n; k++) {   /* swap pivot row with row j */
+                        u32 tmp = M[j*n + k];
+                        M[j*n + k] = M[pivot*n + k];
+                        M[pivot*n + k] = tmp;
                 }
-                for (int i = 0; i < n; i++)
-                { /* eliminate everything else on column j */
+                for (int i = 0; i < n; i++) {  /* eliminate everything else on column j */
                         if (i == j)
                                 continue;
-                        u64 multiplier = M[i * n + j];
-                        for (int k = 0; k < n; k++)
-                        {
+                        u64 multiplier = M[i*n+j];
+                        for (int k = 0; k < n; k++) {
                                 u64 x = M[i * n + k];
                                 u64 y = M[j * n + k];
-                                M[i * n + k] = (x + (prime - multiplier) * y) % prime;
+                                M[i * n + k] = (x + (prime - multiplier) * y) % prime;  
                         }
                 }
         }
         /* phase 2: compute d and winv */
         for (int i = 0; i < n; i++)
-                for (int j = 0; j < n; j++)
-                {
-                        M[i * n + j] = (d[i] && d[j]) ? M_[i * n + j] : 0;
-                        winv[i * n + j] = ((i == j) && d[i]) ? 1 : 0;
+                for (int j = 0; j < n; j++) {
+                        M[i*n + j] = (d[i] && d[j]) ? M_[i*n + j] : 0;
+                        winv[i*n + j] = ((i == j) && d[i]) ? 1 : 0;
                 }
         npiv = 0;
         for (int i = 0; i < n; i++)
                 d[i] = 0;
         /* same dance */
-        for (int j = 0; j < n; j++)
-        {
+        for (int j = 0; j < n; j++) { 
                 int pivot = n;
                 for (int i = j; i < n; i++)
-                        if (M[i * n + j] != 0)
-                        {
+                        if (M[i*n + j] != 0) {
                                 pivot = i;
                                 break;
                         }
@@ -425,42 +400,36 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
                         continue;
                 d[j] = 1;
                 npiv += 1;
-                u64 pinv = invmod(M[pivot * n + j], prime);
-                for (int k = 0; k < n; k++)
-                {
-                        u64 x = M[pivot * n + k];
-                        M[pivot * n + k] = (x * pinv) % prime;
+                u64 pinv = invmod(M[pivot*n + j], prime);
+                for (int k = 0; k < n; k++) {
+                        u64 x = M[pivot*n + k];
+                        M[pivot*n + k] = (x * pinv) % prime;
                 }
-                for (int k = 0; k < n; k++)
-                {
-                        u32 tmp = M[j * n + k];
-                        M[j * n + k] = M[pivot * n + k];
-                        M[pivot * n + k] = tmp;
+                for (int k = 0; k < n; k++) {
+                        u32 tmp = M[j*n + k];
+                        M[j*n + k] = M[pivot*n + k];
+                        M[pivot*n + k] = tmp;
                 }
-                for (int k = 0; k < n; k++)
-                {
+                for (int k = 0; k < n; k++) {
                         u64 x = winv[pivot * n + k];
                         winv[pivot * n + k] = (x * pinv) % prime;
                 }
-                for (int k = 0; k < n; k++)
-                {
+                for (int k = 0; k < n; k++) {
                         u32 tmp = winv[j * n + k];
                         winv[j * n + k] = winv[pivot * n + k];
                         winv[pivot * n + k] = tmp;
                 }
-                for (int i = 0; i < n; i++)
-                {
+                for (int i = 0; i < n; i++) {
                         if (i == j)
                                 continue;
                         u64 multiplier = M[i * n + j];
-                        for (int k = 0; k < n; k++)
-                        {
+                        for (int k = 0; k < n; k++) {
                                 u64 x = M[i * n + k];
                                 u64 y = M[j * n + k];
                                 M[i * n + k] = (x + (prime - multiplier) * y) % prime;
                                 u64 w = winv[i * n + k];
                                 u64 z = winv[j * n + k];
-                                winv[i * n + k] = (w + (prime - multiplier) * z) % prime;
+                                winv[i * n + k] = (w + (prime - multiplier) * z) % prime;  
                         }
                 }
         }
@@ -470,30 +439,29 @@ int semi_inverse(u32 const *M_, u32 *winv, u32 *d)
 /*************************** block-Lanczos algorithm ************************/
 
 /* Computes vtAv <-- transpose(v) * Av, vtAAv <-- transpose(Av) * Av */
-void block_dot_products(u32 *vtAv, u32 *vtAAv, int N, u32 const *Av, u32 const *v)
+void block_dot_products(u32 * vtAv, u32 * vtAAv, int N, u32 const * Av, u32 const * v)
 {
         for (int i = 0; i < n * n; i++)
                 vtAv[i] = 0;
         for (int i = 0; i < N; i += n)
-                matmul_CpAtB(vtAv, &v[i * n], &Av[i * n]);
-
+                matmul_CpAtB(vtAv, &v[i*n], &Av[i*n]);
+        
         for (int i = 0; i < n * n; i++)
                 vtAAv[i] = 0;
         for (int i = 0; i < N; i += n)
-                matmul_CpAtB(vtAAv, &Av[i * n], &Av[i * n]);
+                matmul_CpAtB(vtAAv, &Av[i*n], &Av[i*n]);
 }
 
 /* Compute the next values of v (in tmp) and p */
-void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 *vtAAv,
-                   u32 const *winv, int N, u32 const *Av)
+void orthogonalize(u32 * v, u32 * tmp, u32 * p, u32 * d, u32 const * vtAv, const u32 *vtAAv, 
+        u32 const * winv, int N, u32 const * Av)
 {
         /* compute the n x n matrix c */
         u32 c[n * n];
         u32 spliced[n * n];
         for (int i = 0; i < n; i++)
-                for (int j = 0; j < n; j++)
-                {
-                        spliced[i * n + j] = d[j] ? vtAAv[i * n + j] : vtAv[i * n + j];
+                for (int j = 0; j < n; j++) {
+                        spliced[i*n + j] = d[j] ? vtAAv[i * n + j] : vtAv[i * n + j];
                         c[i * n + j] = 0;
                 }
         matmul_CpAB(c, winv, spliced);
@@ -504,38 +472,37 @@ void orthogonalize(u32 *v, u32 *tmp, u32 *p, u32 *d, u32 const *vtAv, const u32 
         u32 vtAvd[n * n];
         for (int i = 0; i < n; i++)
                 for (int j = 0; j < n; j++)
-                        vtAvd[i * n + j] = d[j] ? prime - vtAv[i * n + j] : 0;
+                        vtAvd[i*n + j] = d[j] ? prime - vtAv[i * n + j] : 0;
 
-        /* compute the next value of v ; store it in tmp */
+        /* compute the next value of v ; store it in tmp */        
         for (long i = 0; i < N; i++)
                 for (long j = 0; j < n; j++)
-                        tmp[i * n + j] = d[j] ? Av[i * n + j] : v[i * n + j];
+                        tmp[i*n + j] = d[j] ? Av[i*n + j] : v[i * n + j];
         for (long i = 0; i < N; i += n)
-                matmul_CpAB(&tmp[i * n], &v[i * n], c);
+                matmul_CpAB(&tmp[i*n], &v[i*n], c);
         for (long i = 0; i < N; i += n)
-                matmul_CpAB(&tmp[i * n], &p[i * n], vtAvd);
-
+                matmul_CpAB(&tmp[i*n], &p[i*n], vtAvd);
+        
         /* compute the next value of p */
         for (long i = 0; i < N; i++)
                 for (long j = 0; j < n; j++)
                         p[i * n + j] = d[j] ? 0 : p[i * n + j];
         for (long i = 0; i < N; i += n)
-                matmul_CpAB(&p[i * n], &v[i * n], winv);
+                matmul_CpAB(&p[i*n], &v[i*n], winv);
 }
 
 void verbosity()
 {
         n_iterations += 1;
         double elapsed = wtime() - start;
-        if (elapsed - last_print < 1)
+        if (elapsed - last_print < 1) 
                 return;
 
         last_print = elapsed;
         double per_iteration = elapsed / n_iterations;
         double estimated_length = expected_iterations * per_iteration;
         time_t end = start + estimated_length;
-        if (!ETA_flag)
-        {
+        if (!ETA_flag) {
                 int d = estimated_length / 86400;
                 estimated_length -= d * 86400;
                 int h = estimated_length / 3600;
@@ -555,69 +522,67 @@ void verbosity()
         }
         char ETA[30];
         ctime_r(&end, ETA);
-        ETA[strlen(ETA) - 1] = 0; // élimine le \n final
-        printf("\r    - iteration %d / %d. %.3fs per iteration. ETA: %s",
-               n_iterations, expected_iterations, per_iteration, ETA);
+        ETA[strlen(ETA) - 1] = 0;  // élimine le \n final
+        printf("\r    - iteration %d / %d. %.3fs per iteration. ETA: %s", 
+                n_iterations, expected_iterations, per_iteration, ETA);
         fflush(stdout);
 }
 
 /* optional tests */
-void correctness_tests(u32 const *vtAv, u32 const *vtAAv, u32 const *winv, u32 const *d)
+void correctness_tests(u32 const * vtAv, u32 const * vtAAv, u32 const * winv, u32 const * d)
 {
         /* vtAv, vtAAv, winv are actually symmetric + winv and d match */
-        for (int i = 0; i < n; i++)
-                for (int j = 0; j < n; j++)
-                {
-                        assert(vtAv[i * n + j] == vtAv[j * n + i]);
-                        assert(vtAAv[i * n + j] == vtAAv[j * n + i]);
-                        assert(winv[i * n + j] == winv[j * n + i]);
-                        assert((winv[i * n + j] == 0) || d[i] || d[j]);
+        for (int i = 0; i < n; i++) 
+                for (int j = 0; j < n; j++) {
+                        assert(vtAv[i*n + j] == vtAv[j*n + i]);
+                        assert(vtAAv[i*n + j] == vtAAv[j*n + i]);
+                        assert(winv[i*n + j] == winv[j*n + i]);
+                        assert((winv[i*n + j] == 0) || d[i] || d[j]);
                 }
         /* winv satisfies d == winv * vtAv*d */
         u32 vtAvd[n * n];
         u32 check[n * n];
-        for (int i = 0; i < n; i++)
-                for (int j = 0; j < n; j++)
-                {
-                        vtAvd[i * n + j] = d[j] ? vtAv[i * n + j] : 0;
-                        check[i * n + j] = 0;
+        for (int i = 0; i < n; i++) 
+                for (int j = 0; j < n; j++) {
+                        vtAvd[i*n + j] = d[j] ? vtAv[i*n + j] : 0;
+                        check[i*n + j] = 0;
                 }
         matmul_CpAB(check, winv, vtAvd);
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < n; i++) 
                 for (int j = 0; j < n; j++)
                         if (i == j)
-                                assert(check[j * n + j] == d[i]);
+                                assert(check[j*n + j] == d[i]);
                         else
-                                assert(check[i * n + j] == 0);
+                                assert(check[i*n + j] == 0);
 }
 
 /* check that we actually computed a kernel vector */
-void final_check(int nrows, int ncols, u32 const *v, u32 const *vtM)
+void final_check(int nrows, int ncols, u32 const * v, u32 const * vtM)
 {
         printf("Final check:\n");
         /* Check if v != 0 */
         bool good = false;
         for (long i = 0; i < nrows; i++)
                 for (long j = 0; j < n; j++)
-                        good |= (v[i * n + j] != 0);
+                        good |= (v[i*n + j] != 0);
         if (good)
                 printf("  - OK:    v != 0\n");
         else
                 printf("  - KO:    v == 0\n");
-
+                
         /* tmp == Mt * v. Check if tmp == 0 */
         good = true;
         for (long i = 0; i < ncols; i++)
                 for (long j = 0; j < n; j++)
-                        good &= (vtM[i * n + j] == 0);
+                        good &= (vtM[i*n + j] == 0);
         if (good)
                 printf("  - OK: vt*M == 0\n");
         else
-                printf("  - KO: vt*M != 0\n");
+                printf("  - KO: vt*M != 0\n");                
 }
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
-u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
+u32 * block_lanczos(struct sparsematrix_t const * M, int n, bool transpose)
 {
         printf("Block Lanczos\n");
 
@@ -639,25 +604,20 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         u32 *p = malloc(sizeof(*p) * block_size_pad);
         if (v == NULL || tmp == NULL || Av == NULL || p == NULL)
                 errx(1, "impossible d'allouer les blocs de vecteur");
-
+        
         /* warn the user */
         expected_iterations = 1 + ncols / n;
         char human_its[8];
         human_format(human_its, expected_iterations);
         printf("  - Expecting %s iterations\n", human_its);
-
+        
         /* prepare initial values */
-        for (long i = 0; i < block_size_pad; i++)
-        {
+        for (long i = 0; i < block_size_pad; i++) {
                 Av[i] = 0;
                 v[i] = 0;
                 p[i] = 0;
                 tmp[i] = 0;
         }
-
-        fprintf(stderr, "block size %ld\n", block_size);
-
-        fprintf(stderr, "block size pad %ld\n", block_size_pad);
 
         for (long i = 0; i < block_size; i++)
                 v[i] = random64() % prime;
@@ -665,59 +625,36 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
         /************* main loop *************/
         printf("  - Main loop\n");
         start = wtime();
-        // bool stop = false;
-        // while (true)
-        // {
-        //         if (stop_after > 0 && n_iterations == stop_after)
-        //                 break;
+        bool stop = false;
+        while (true) {
+                if (stop_after > 0 && n_iterations == stop_after)
+                        break;
 
-        sparse_matrix_vector_product(tmp, M, v, !transpose);
+                sparse_matrix_vector_product(tmp, M, v, !transpose);
+                sparse_matrix_vector_product(Av, M, tmp, transpose);
 
-        sparse_matrix_vector_product(Av, M, tmp, transpose);
+                u32 vtAv[n * n];
+                u32 vtAAv[n * n];
+                block_dot_products(vtAv, vtAAv, nrows, Av, v);
 
-        FILE *f = fopen("check.mtx", "a+");
+                u32 winv[n * n];
+                u32 d[n];
+                stop = (semi_inverse(vtAv, winv, d) == 0);
 
-        for (long u = 0; u < block_size_pad; u++)
-        {
-                fprintf(f, "%d \n", Av[u]);
+                /* check that everything is working ; disable in production */
+                correctness_tests(vtAv, vtAAv, winv, d);
+                        
+                if (stop)
+                        break;
+
+                orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
+
+                /* the next value of v is in tmp ; copy */
+                for (long i = 0; i < block_size; i++)
+                        v[i] = tmp[i];
+
+                verbosity();
         }
-
-        fclose(f);
-
-        u32 vtAv[n * n];
-        u32 vtAAv[n * n];
-
-        fprintf(stderr, "%d\n", nrows);
-        block_dot_products(vtAv, vtAAv, nrows, Av, v);
-
-        u32 winv[n * n];
-        u32 d[n];
-        // stop = (semi_inverse(vtAv, winv, d) == 0);
-
-        /* check that everything is working ; disable in production */
-        // correctness_tests(vtAv, vtAAv, winv, d);
-
-        // if (stop)
-        //         break;
-
-        orthogonalize(v, tmp, p, d, vtAv, vtAAv, winv, nrows, Av);
-
-        /* the next value of v is in tmp ; copy */
-        for (long i = 0; i < block_size; i++)
-                v[i] = tmp[i];
-
-        verbosity();
-
-        for (int i = 0; i < n * n; i++)
-        {
-                fprintf(stderr, "%d\n", vtAv[i]);
-        }
-
-        for (int i = 0; i < n * n; i++)
-        {
-                fprintf(stderr, "%d\n", vtAAv[i]);
-        }
-        //}
         printf("\n");
 
         if (stop_after < 0)
@@ -731,10 +668,10 @@ u32 *block_lanczos(struct sparsematrix_t const *M, int n, bool transpose)
 
 /**************************** dense vector block IO ************************/
 
-void save_vector_block(char const *filename, int nrows, int ncols, u32 const *v)
+void save_vector_block(char const * filename, int nrows, int ncols, u32 const * v)
 {
         printf("Saving result in %s\n", filename);
-        FILE *f = fopen(filename, "w");
+        FILE * f = fopen(filename, "w");
         if (f == NULL)
                 err(1, "cannot open %s", filename);
         fprintf(f, "%%%%MatrixMarket matrix array integer general\n");
@@ -742,21 +679,21 @@ void save_vector_block(char const *filename, int nrows, int ncols, u32 const *v)
         fprintf(f, "%d %d\n", nrows, ncols);
         for (long j = 0; j < ncols; j++)
                 for (long i = 0; i < nrows; i++)
-                        fprintf(f, "%d\n", v[i * n + j]);
+                        fprintf(f, "%d\n", v[i*n + j]);
         fclose(f);
 }
 
 /*************************** main function *********************************/
 
-int main(int argc, char **argv)
+int main(int argc, char ** argv)
 {
         process_command_line_options(argc, argv);
-
+        
         struct sparsematrix_t M;
         sparsematrix_mm_load(&M, matrix_filename);
 
         u32 *kernel = block_lanczos(&M, n, right_kernel);
-
+ 
         if (kernel_filename)
                 save_vector_block(kernel_filename, right_kernel ? M.ncols : M.nrows, n, kernel);
         else
