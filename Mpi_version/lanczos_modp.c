@@ -651,10 +651,6 @@ void transposeMatrix(struct sparsematrix_t *M)
         M->j = i;
 }
 
-// void sortMatrix(struct sparsematrix_t *M)
-// {
-// }
-
 // subdivise M par colonnes
 struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int my_rank)
 {
@@ -1005,167 +1001,187 @@ void gatherFinalV(u32 *v, u32 *v_processus, int processus_ncols, int ncols, int 
 }
 
 /************* Sorting functions *************/
-
-void bubbleSort(struct sparsematrix_t *M_processus, int order)
+void swap(struct sparsematrix_t *M, int u, int i)
 {
         u32 temp;
-
-        if (order == 0)
-        {
-
-                for (int i = 0; i < M_processus->nnz - 1; i++)
-                {
-                        for (int u = 1; u < M_processus->nnz - i; u++)
-                        {
-                                // si la condition est verifié j'inverse i, j et x
-                                if (M_processus->j[u] < M_processus->j[u - 1])
-                                {
-                                        // swap j
-                                        temp = M_processus->j[u];
-                                        M_processus->j[u] = M_processus->j[u - 1];
-                                        M_processus->j[u - 1] = temp;
-                                        // swap i
-                                        temp = M_processus->i[u];
-                                        M_processus->i[u] = M_processus->i[u - 1];
-                                        M_processus->i[u - 1] = temp;
-                                        // swap x
-                                        temp = M_processus->x[u];
-                                        M_processus->x[u] = M_processus->x[u - 1];
-                                        M_processus->x[u - 1] = temp;
-                                }
-                        }
-                }
-        }
-        else
-        {
-
-                for (int i = 0; i < M_processus->nnz - 1; i++)
-                {
-                        for (int u = 1; u < M_processus->nnz - i; u++)
-                        {
-                                // si la condition est verifié j'inverse i, j et x
-                                if (M_processus->j[u] > M_processus->j[u - 1])
-                                {
-                                        // swap j
-                                        temp = M_processus->j[u];
-                                        M_processus->j[u] = M_processus->j[u - 1];
-                                        M_processus->j[u - 1] = temp;
-                                        // swap i
-                                        temp = M_processus->i[u];
-                                        M_processus->i[u] = M_processus->i[u - 1];
-                                        M_processus->i[u - 1] = temp;
-                                        // swap x
-                                        temp = M_processus->x[u];
-                                        M_processus->x[u] = M_processus->x[u - 1];
-                                        M_processus->x[u - 1] = temp;
-                                }
-                        }
-                }
-        }
+        temp = M->j[u];
+        M->j[u] = M->j[i];
+        M->j[i] = temp;
+        // swap i
+        temp = M->i[u];
+        M->i[u] = M->i[i];
+        M->i[i] = temp;
+        // swap x
+        temp = M->x[u];
+        M->x[u] = M->x[i];
+        M->x[i] = temp;
 }
 
-void swap(int neighbor_rank, int nb_processus, struct sparsematrix_t *M_processus, int nnz_neighbor, int max)
+// Function that merges the two arrays
+void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct sparsematrix_t arr2, int n2)
 {
+        M->i = (int *)malloc((n1 + n2) * sizeof(int));
 
-        if (neighbor_rank >= 0 && neighbor_rank <= nb_processus - 1)
+        M->j = (int *)malloc((n1 + n2) * sizeof(int));
+
+        M->x = (u32 *)malloc((n1 + n2) * sizeof(u32));
+
+        int i = 0;
+        int u = 0;
+        int k;
+
+        for (k = 0; k < n1 + n2; k++)
         {
-
-                int *received_i = (int *)malloc(nnz_neighbor * sizeof(int));
-                int *received_j = (int *)malloc(nnz_neighbor * sizeof(int));
-                u32 *received_x = (u32 *)malloc(nnz_neighbor * sizeof(u32));
-
-                // we send and receives our k's
-                MPI_Sendrecv(M_processus->i, M_processus->nnz, MPI_INT, neighbor_rank, 15, received_i, nnz_neighbor, MPI_INT, neighbor_rank, 15, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Sendrecv(M_processus->j, M_processus->nnz, MPI_INT, neighbor_rank, 15, received_j, nnz_neighbor, MPI_INT, neighbor_rank, 15, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Sendrecv(M_processus->x, M_processus->nnz, MPI_UINT32_T, neighbor_rank, 15, received_x, nnz_neighbor, MPI_UINT32_T, neighbor_rank, 15, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                struct sparsematrix_t combo;
-
-                combo.nnz = nnz_neighbor + M_processus->nnz;
-
-                combo.i = (int *)malloc(combo.nnz * sizeof(int));
-                combo.j = (int *)malloc(combo.nnz * sizeof(int));
-                combo.x = (u32 *)malloc(combo.nnz * sizeof(u32));
-
-                int i;
-                for (i = 0; i < M_processus->nnz; i++)
+                if (i >= n1)
                 {
-                        combo.i[i] = M_processus->i[i];
-                        combo.j[i] = M_processus->j[i];
-                        combo.x[i] = M_processus->x[i];
+                        M->i[k] = arr2.i[u];
+                        M->j[k] = arr2.j[u];
+                        M->x[k] = arr2.x[u];
+                        u++;
                 }
-
-                for (int u = 0; u < nnz_neighbor; u++)
+                else if (u >= n2)
                 {
-                        combo.i[i] = received_i[u];
-                        combo.j[i] = received_j[u];
-                        combo.x[i] = received_x[u];
-
+                        M->i[k] = arr1.i[i];
+                        M->j[k] = arr2.j[i];
+                        M->x[k] = arr2.x[i];
                         i++;
                 }
 
-                // max == 1 for max or max ==0 for min
-
-                bubbleSort(&combo, max);
-
-                for (i = 0; i < M_processus->nnz; i++)
+                // Indices in bounds as i < n1
+                // && j < n2
+                else if (arr1.j[i] < arr2.j[u])
                 {
-                        M_processus->i[i] = combo.i[i];
-                        M_processus->j[i] = combo.j[i];
-                        M_processus->x[i] = combo.x[i];
+                        M->i[k] = arr1.i[i];
+                        M->j[k] = arr1.j[i];
+                        M->x[k] = arr1.x[i];
+                        i++;
                 }
 
-                free(combo.i);
-                free(combo.j);
-                free(combo.x);
+                // v2[j] <= v1[i]
+                else
+                {
+                        M->i[k] = arr2.i[u];
+                        M->j[k] = arr2.j[u];
+                        M->x[k] = arr2.x[u];
+                        u++;
+                }
         }
 }
 
-void odd_even_sort(struct sparsematrix_t *M_processus, int ncols, int my_rank, int nb_processus)
+// Function that performs the Quick Sort
+void quicksort(struct sparsematrix_t *M_processus, int start, int end)
 {
+        int pivot, index;
+
+        // Base Case
+        if (end <= 1)
+                return;
+
+        // Pick pivot and swap with first
+        // element Pivot is middle element
+        pivot = M_processus->j[start + end / 2];
+        swap(M_processus, start, start + end / 2);
+
+        // Partitioning Steps
+        index = start;
+
+        // Iterate over the range [start, end]
+        for (int i = start + 1; i < start + end; i++)
+        {
+
+                // Swap if the element is less
+                // than the pivot element
+                if (M_processus->j[i] < pivot)
+                {
+                        index++;
+                        swap(M_processus, i, index);
+                }
+        }
+
+        // Swap the pivot into place
+        swap(M_processus, start, index);
+
+        // Recursive Call for sorting
+        // of quick sort function
+        quicksort(M_processus, start, index - start);
+        quicksort(M_processus, index + 1, start + end - index - 1);
+}
+
+void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int ncols, int my_rank, int nb_processus)
+{
+
         long int size[nb_processus];
+
         // fprintf(stderr, "gathering  %d\n", my_rank);
 
         MPI_Allgather(&M_processus->nnz, 1, MPI_LONG, size, 1, MPI_LONG, MPI_COMM_WORLD);
-        // fprintf(stderr, "finish gathering  %d\n", my_rank);
 
-        // printArray(arr, k, my_rank);
+        // Sorting array with quick sort for every
+        // chunk as called by process
+        quicksort(M_processus, 0, M_processus->nnz);
 
-        for (int i = 0; i < nb_processus - 1; i++)
+        int sent = 0;
+
+        for (int step = 1; step < nb_processus; step = 2 * step)
         {
-                bubbleSort(M_processus, 0);
+                if (sent != 1 && my_rank % (2 * step) != 0)
+                {
+                        fprintf(stderr, "Sending %d to %d\n", my_rank, my_rank - step);
+                        MPI_Send(M_processus->i, M_processus->nnz, MPI_INT,
+                                 my_rank - step, 0,
+                                 MPI_COMM_WORLD);
 
-                if (i % 2 == 0)
-                {
-                        if (my_rank % 2 == 0)
-                        {
-                                // fprintf(stderr, "swap  %d\n", my_rank);
-                                swap(my_rank + 1, nb_processus, M_processus, size[my_rank + 1], 0);
-                                // fprintf(stderr, "end swap  %d\n", my_rank);
-                        }
-                        else
-                        {
-                                // fprintf(stderr, "swap  %d\n", my_rank);
-                                swap(my_rank - 1, nb_processus, M_processus, size[my_rank - 1], 1);
-                                // fprintf(stderr, "end swap  %d\n", my_rank);
-                        }
+                        MPI_Send(M_processus->j, M_processus->nnz, MPI_INT,
+                                 my_rank - step, 1,
+                                 MPI_COMM_WORLD);
+
+                        MPI_Send(M_processus->x, M_processus->nnz, MPI_UINT32_T,
+                                 my_rank - step, 2,
+                                 MPI_COMM_WORLD);
+
+                        sent = 1;
                 }
-                else
+
+                if (sent != 1 && my_rank + step < nb_processus)
                 {
-                        if (my_rank % 2 == 0)
-                        {
-                                // fprintf(stderr, "swap  %d\n", my_rank);
-                                swap(my_rank - 1, nb_processus, M_processus, size[my_rank - 1], 1);
-                                //   fprintf(stderr, "end swap  %d\n", my_rank);
-                        }
-                        else
-                        {
-                                // fprintf(stderr, "swap  %d\n", my_rank);
-                                swap(my_rank + 1, nb_processus, M_processus, size[my_rank + 1], 0);
-                                //  fprintf(stderr, "end swap  %d\n", my_rank);
-                        }
+                        fprintf(stderr, "Receiving %d from %d\n", my_rank, my_rank + step);
+                        struct sparsematrix_t received;
+
+                        received.i = (int *)malloc(
+                            size[my_rank + step] * sizeof(int));
+                        received.j = (int *)malloc(
+                            size[my_rank + step] * sizeof(int));
+                        received.x = (u32 *)malloc(
+                            size[my_rank + step] * sizeof(u32));
+
+                        MPI_Recv(received.i, size[my_rank + step],
+                                 MPI_INT, my_rank + step, 0,
+                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        MPI_Recv(received.j, size[my_rank + step],
+                                 MPI_INT, my_rank + step, 1,
+                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        MPI_Recv(received.x, size[my_rank + step],
+                                 MPI_UINT32_T, my_rank + step, 2,
+                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                        merge(M, *M_processus, M_processus->nnz, received, size[my_rank + step]);
+                        M_processus->i = M->i;
+                        M_processus->j = M->j;
+                        M_processus->x = M->x;
+
+                        M_processus->nnz = M_processus->nnz + size[my_rank + step];
+
+                        free(received.i);
+                        free(received.j);
+                        free(received.x);
                 }
+
+                MPI_Allgather(&M_processus->nnz, 1, MPI_LONG, size, 1, MPI_LONG, MPI_COMM_WORLD);
         }
+
+        *M_processus = subdiviseM(*M, nb_processus, my_rank);
 
         int bloc_size = ncols / nb_processus;
 
@@ -1201,26 +1217,27 @@ void save_vector_block(char const *filename, int nrows, int ncols, u32 const *v)
 /*************************** main functions *********************************/
 
 /* Solve x*M == 0 or M*x == 0 (if transpose == True) */
-u32 *block_lanczos(struct sparsematrix_t const M, int n, int my_rank, int nb_processus)
+u32 *block_lanczos(struct sparsematrix_t *M, int n, int my_rank, int nb_processus)
 {
 
         /************* preparations **************/
 
-        int ncols = getCols(M, my_rank);
+        int ncols = getCols(*M, my_rank);
 
         // je subdivise M first
-        struct sparsematrix_t M_processus = subdiviseM(M, nb_processus, my_rank);
+        struct sparsematrix_t M_processus = subdiviseM(*M, nb_processus, my_rank);
 
         double time = wtime();
 
-        odd_even_sort(&M_processus, ncols, my_rank, nb_processus);
+        sortM(M, &M_processus, ncols, my_rank, nb_processus);
 
-        printf("Terminated in %f\n", wtime() - time);
+        if (my_rank == 0)
+                printf("Sorting Terminated in %f\n", wtime() - time);
 
         // Subdivise + sort M
 
         // je subdivise V
-        u32 *v_processus = subdiviseV(ncols, M.nrows, n, nb_processus, my_rank);
+        u32 *v_processus = subdiviseV(ncols, M->nrows, n, nb_processus, my_rank);
 
         /*********** declarations ***********/
         u32 vtAv_processus[n * n];
@@ -1348,7 +1365,7 @@ int main(int argc, char **argv)
         }
 
         // coeur du travail
-        u32 *kernel = block_lanczos(M, n, my_rank, nb_processus);
+        u32 *kernel = block_lanczos(&M, n, my_rank, nb_processus);
 
         if (my_rank == 0)
         {
