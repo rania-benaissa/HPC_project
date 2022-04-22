@@ -634,23 +634,6 @@ void final_check(int nrows, int ncols, u32 const *v, u32 const *vtM)
 
 /*************************** Our functions *********************************/
 
-void transposeMatrix(struct sparsematrix_t *M)
-{
-        // si on applique pas la transpsée
-
-        int cols = M->ncols;
-
-        M->ncols = M->nrows;
-
-        M->nrows = cols;
-
-        int *i = M->i;
-
-        M->i = M->j;
-
-        M->j = i;
-}
-
 // subdivise M par colonnes
 struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int my_rank)
 {
@@ -706,7 +689,6 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 for (int i = 0; i < nb_processus; i++)
                 {
                         nnz[i] = nnz_processus[i];
-                        fprintf(stderr, "nb of nnz for processus %d = %ld\n", i, nnz_processus[i]);
                 }
 
                 M_processus.i = malloc(nnz_processus[0] * sizeof(*M_processus.i));
@@ -738,6 +720,8 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 MPI_Scatterv(M.j, nnz, displs, MPI_INT, M_processus.j, nnz_processus[0], MPI_INT, 0, MPI_COMM_WORLD);
                 MPI_Scatterv(M.x, nnz, displs, MPI_UINT32_T, M_processus.x, nnz_processus[0], MPI_UINT32_T, 0, MPI_COMM_WORLD);
                 // fprintf(stderr, "nrows = %d, ncols = %d\n", M_processus.nrows, M_processus.ncols);
+                free(nnz_processus);
+                free(cols_processus);
         }
         else
         {
@@ -1030,6 +1014,46 @@ void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct 
         int u = 0;
         int k;
 
+        // if (axe == 0)
+
+        //         for (k = 0; k < n1 + n2; k++)
+        //         {
+        //                 if (i >= n1)
+        //                 {
+        //                         M->i[k] = arr2.i[u];
+        //                         M->j[k] = arr2.j[u];
+        //                         M->x[k] = arr2.x[u];
+        //                         u++;
+        //                 }
+        //                 else if (u >= n2)
+        //                 {
+        //                         M->i[k] = arr1.i[i];
+        //                         M->j[k] = arr2.j[i];
+        //                         M->x[k] = arr2.x[i];
+        //                         i++;
+        //                 }
+
+        //                 // Indices in bounds as i < n1
+        //                 // && j < n2
+        //                 else if (arr1.i[i] < arr2.i[u])
+        //                 {
+        //                         M->i[k] = arr1.i[i];
+        //                         M->j[k] = arr1.j[i];
+        //                         M->x[k] = arr1.x[i];
+        //                         i++;
+        //                 }
+
+        //                 // v2[j] <= v1[i]
+        //                 else
+        //                 {
+        //                         M->i[k] = arr2.i[u];
+        //                         M->j[k] = arr2.j[u];
+        //                         M->x[k] = arr2.x[u];
+        //                         u++;
+        //                 }
+        //         }
+        // else
+
         for (k = 0; k < n1 + n2; k++)
         {
                 if (i >= n1)
@@ -1042,8 +1066,8 @@ void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct 
                 else if (u >= n2)
                 {
                         M->i[k] = arr1.i[i];
-                        M->j[k] = arr1.j[i];
-                        M->x[k] = arr1.x[i];
+                        M->j[k] = arr2.j[i];
+                        M->x[k] = arr2.x[i];
                         i++;
                 }
 
@@ -1069,7 +1093,7 @@ void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct 
 }
 
 // Function that performs the Quick Sort
-void quicksort(struct sparsematrix_t *M_processus, int start, int end)
+void quicksort(struct sparsematrix_t *M_processus, int start, int end, int axe)
 {
         int pivot, index;
 
@@ -1079,7 +1103,12 @@ void quicksort(struct sparsematrix_t *M_processus, int start, int end)
 
         // Pick pivot and swap with first
         // element Pivot is middle element
-        pivot = M_processus->j[start + end / 2];
+
+        if (axe == 0)
+                pivot = M_processus->i[start + end / 2];
+        else
+                pivot = M_processus->j[start + end / 2];
+
         swap(M_processus, start, start + end / 2);
 
         // Partitioning Steps
@@ -1091,10 +1120,22 @@ void quicksort(struct sparsematrix_t *M_processus, int start, int end)
 
                 // Swap if the element is less
                 // than the pivot element
-                if (M_processus->j[i] < pivot)
+                if (axe == 0)
                 {
-                        index++;
-                        swap(M_processus, i, index);
+
+                        if (M_processus->i[i] < pivot)
+                        {
+                                index++;
+                                swap(M_processus, i, index);
+                        }
+                }
+                else
+                {
+                        if (M_processus->j[i] < pivot)
+                        {
+                                index++;
+                                swap(M_processus, i, index);
+                        }
                 }
         }
 
@@ -1103,8 +1144,8 @@ void quicksort(struct sparsematrix_t *M_processus, int start, int end)
 
         // Recursive Call for sorting
         // of quick sort function
-        quicksort(M_processus, start, index - start);
-        quicksort(M_processus, index + 1, start + end - index - 1);
+        quicksort(M_processus, start, index - start, axe);
+        quicksort(M_processus, index + 1, start + end - index - 1, axe);
 }
 
 void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int ncols, int my_rank, int nb_processus)
@@ -1118,7 +1159,7 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
 
         // Sorting array with quick sort for every
         // chunk as called by process
-        quicksort(M_processus, 0, M_processus->nnz);
+        quicksort(M_processus, 0, M_processus->nnz, 1);
 
         int sent = 0;
 
@@ -1126,7 +1167,7 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
         {
                 if (sent != 1 && my_rank % (2 * step) != 0)
                 {
-                        fprintf(stderr, "%d sending  to %d\n", my_rank, my_rank - step);
+
                         MPI_Send(M_processus->i, M_processus->nnz, MPI_INT,
                                  my_rank - step, 0,
                                  MPI_COMM_WORLD);
@@ -1144,7 +1185,6 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
 
                 if (sent != 1 && my_rank + step < nb_processus)
                 {
-                        fprintf(stderr, "%d receiving  from %d\n", my_rank, my_rank + step);
                         struct sparsematrix_t received;
 
                         received.i = (int *)malloc(
@@ -1167,7 +1207,6 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
                                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
                         merge(M, *M_processus, M_processus->nnz, received, size[my_rank + step]);
-
                         M_processus->i = M->i;
                         M_processus->j = M->j;
                         M_processus->x = M->x;
@@ -1182,17 +1221,40 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
                 MPI_Allgather(&M_processus->nnz, 1, MPI_LONG, size, 1, MPI_LONG, MPI_COMM_WORLD);
         }
 
-        // if (my_rank == 0)
-        // {
-        //         FILE *f = fopen("check.mtx", "a+");
+        if (my_rank == 0)
+        {
 
-        //         for (int u = 0; u < M_processus->nnz; u++)
-        //         {
-        //                 fprintf(f, "%d %d %d \n", M_processus->i[u] + 1, M_processus->j[u] + 1, M_processus->x[u]);
-        //         }
+                //*M_processus = subdiviseM(*M, nb_processus, my_rank);
+                int max_j = M->j[M->nnz - 1];
+                fprintf(stderr, "maxj %d \n", max_j);
 
-        //         fclose(f);
-        // }
+                int counts[max_j + 1];
+
+                // fprintf(stderr, "i'm here %d", my_rank);
+
+                for (int i = 0; i <= max_j; i++)
+                {
+                        counts[i] = 0;
+                }
+
+                for (int u = 0; u < M->nnz; u++)
+                {
+
+                        counts[M->j[u]]++;
+                }
+
+                int displs = 0;
+
+                for (int i = 0; i <= max_j; i++)
+                {
+                        // fprintf(stderr, "counts %d = %d\n", i, counts[i]);
+                        // fprintf(stderr, "disps %d, disps + count %d\n", displs, displs + counts[i]);
+
+                        quicksort(M, displs, displs + counts[i], 0);
+
+                        displs += counts[i];
+                }
+        }
 
         *M_processus = subdiviseM(*M, nb_processus, my_rank);
 
@@ -1243,9 +1305,27 @@ u32 *block_lanczos(struct sparsematrix_t *M, int n, int my_rank, int nb_processu
         double time = wtime();
 
         sortM(M, &M_processus, ncols, my_rank, nb_processus);
+        // sortM(M, &M_processus, ncols, my_rank, nb_processus, 0);
 
         if (my_rank == 0)
                 printf("Sorting Terminated in %f\n", wtime() - time);
+
+        fprintf(stderr, "nb of nnz for processus %d = %ld\n", my_rank, M_processus.nnz);
+
+        // if u wanna verify it
+
+        if (my_rank == 0)
+        {
+
+                FILE *f = fopen("check.mtx", "a+");
+
+                for (long u = 0; u < M_processus.nnz; u++)
+                {
+                        fprintf(f, "%d %d %d \n", M_processus.i[u], M_processus.j[u], M_processus.x[u]);
+                }
+
+                fclose(f);
+        }
 
         // Subdivise + sort M
 
@@ -1372,9 +1452,6 @@ int main(int argc, char **argv)
         if (my_rank == 0)
         {
                 sparsematrix_mm_load(&M, matrix_filename);
-                // dans le cas où l'on utilise pas la transposée -> donc we choose left kernel
-                // if (right_kernel == 0)
-                //         transposeMatrix(&M);
         }
 
         // coeur du travail
