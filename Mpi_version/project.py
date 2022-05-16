@@ -23,7 +23,7 @@ class Main:
     def ensure_mydir(self):
         if not os.path.exists(self.MYDIR):
             print("Creating the ``{}'' directory".format(self.MYDIR))
-            os.mkdir(MYDIR)
+            os.mkdir(self.MYDIR)
     
     def web_request(self, url):
         request = urllib.request.Request(self.BASE_URL + url, method='GET')

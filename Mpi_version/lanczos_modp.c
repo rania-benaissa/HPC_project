@@ -706,7 +706,6 @@ struct sparsematrix_t subdiviseM(struct sparsematrix_t M, int nb_processus, int 
                 for (int i = 0; i < nb_processus; i++)
                 {
                         nnz[i] = nnz_processus[i];
-                        fprintf(stderr, "nb of nnz for processus %d = %ld\n", i, nnz_processus[i]);
                 }
 
                 M_processus.i = malloc(nnz_processus[0] * sizeof(*M_processus.i));
@@ -894,18 +893,13 @@ void sumMod(void *inputBuffer, void *outputBuffer, int *len, MPI_Datatype *datat
 {
         // MUTE THAT PARAMETER è.é
         (void)datatype;
-        u32 *input = (u32 *)inputBuffer;
-        u32 *output = (u32 *)outputBuffer;
-
-        u64 out;
+        u32 *input = inputBuffer;
+        u32 *output = outputBuffer;
 
         for (int i = 0; i < *len; i++)
         {
 
-                out = ((u64)output[i] + (u64)input[i]) % prime;
-                // output[i] = (output[i] + input[i]) % prime;
-
-                output[i] = (u32)out;
+                output[i] = (output[i] + input[i]) % prime;
         }
 }
 
@@ -1126,7 +1120,7 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
         {
                 if (sent != 1 && my_rank % (2 * step) != 0)
                 {
-                        fprintf(stderr, "%d sending  to %d\n", my_rank, my_rank - step);
+                        // fprintf(stderr, "%d sending  to %d\n", my_rank, my_rank - step);
                         MPI_Send(M_processus->i, M_processus->nnz, MPI_INT,
                                  my_rank - step, 0,
                                  MPI_COMM_WORLD);
@@ -1144,7 +1138,7 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
 
                 if (sent != 1 && my_rank + step < nb_processus)
                 {
-                        fprintf(stderr, "%d receiving  from %d\n", my_rank, my_rank + step);
+                        // fprintf(stderr, "%d receiving  from %d\n", my_rank, my_rank + step);
                         struct sparsematrix_t received;
 
                         received.i = (int *)malloc(
@@ -1186,9 +1180,9 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
         // {
         //         FILE *f = fopen("check.mtx", "a+");
 
-        //         for (int u = 0; u < M_processus->nnz; u++)
+        //         for (int u = 0; u < M->nnz; u++)
         //         {
-        //                 fprintf(f, "%d %d %d \n", M_processus->i[u] + 1, M_processus->j[u] + 1, M_processus->x[u]);
+        //                 fprintf(f, "%d %d %ld \n", M->i[u] + 1, M->j[u] + 1, M->x[u]);
         //         }
 
         //         fclose(f);
@@ -1246,6 +1240,7 @@ u32 *block_lanczos(struct sparsematrix_t *M, int n, int my_rank, int nb_processu
 
         if (my_rank == 0)
                 printf("Sorting Terminated in %f\n", wtime() - time);
+        fprintf(stderr, "nb of nnz for processus %d = %ld\n", my_rank, M_processus.nnz);
 
         // Subdivise + sort M
 

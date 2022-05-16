@@ -1014,46 +1014,6 @@ void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct 
         int u = 0;
         int k;
 
-        // if (axe == 0)
-
-        //         for (k = 0; k < n1 + n2; k++)
-        //         {
-        //                 if (i >= n1)
-        //                 {
-        //                         M->i[k] = arr2.i[u];
-        //                         M->j[k] = arr2.j[u];
-        //                         M->x[k] = arr2.x[u];
-        //                         u++;
-        //                 }
-        //                 else if (u >= n2)
-        //                 {
-        //                         M->i[k] = arr1.i[i];
-        //                         M->j[k] = arr2.j[i];
-        //                         M->x[k] = arr2.x[i];
-        //                         i++;
-        //                 }
-
-        //                 // Indices in bounds as i < n1
-        //                 // && j < n2
-        //                 else if (arr1.i[i] < arr2.i[u])
-        //                 {
-        //                         M->i[k] = arr1.i[i];
-        //                         M->j[k] = arr1.j[i];
-        //                         M->x[k] = arr1.x[i];
-        //                         i++;
-        //                 }
-
-        //                 // v2[j] <= v1[i]
-        //                 else
-        //                 {
-        //                         M->i[k] = arr2.i[u];
-        //                         M->j[k] = arr2.j[u];
-        //                         M->x[k] = arr2.x[u];
-        //                         u++;
-        //                 }
-        //         }
-        // else
-
         for (k = 0; k < n1 + n2; k++)
         {
                 if (i >= n1)
@@ -1066,8 +1026,8 @@ void merge(struct sparsematrix_t *M, struct sparsematrix_t arr1, int n1, struct 
                 else if (u >= n2)
                 {
                         M->i[k] = arr1.i[i];
-                        M->j[k] = arr2.j[i];
-                        M->x[k] = arr2.x[i];
+                        M->j[k] = arr1.j[i];
+                        M->x[k] = arr1.x[i];
                         i++;
                 }
 
@@ -1224,7 +1184,6 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
         if (my_rank == 0)
         {
 
-                //*M_processus = subdiviseM(*M, nb_processus, my_rank);
                 int max_j = M->j[M->nnz - 1];
                 fprintf(stderr, "maxj %d \n", max_j);
 
@@ -1247,7 +1206,7 @@ void sortM(struct sparsematrix_t *M, struct sparsematrix_t *M_processus, int nco
 
                 for (int i = 0; i <= max_j; i++)
                 {
-                        // fprintf(stderr, "counts %d = %d\n", i, counts[i]);
+                        fprintf(stderr, "counts %d = %d\n", i, counts[i]);
                         // fprintf(stderr, "disps %d, disps + count %d\n", displs, displs + counts[i]);
 
                         quicksort(M, displs, displs + counts[i], 0);
