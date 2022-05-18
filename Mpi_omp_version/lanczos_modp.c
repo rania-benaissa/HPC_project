@@ -1445,7 +1445,7 @@ u32 *block_lanczos(struct sparsematrix_t *M, int n, int my_rank, int nb_processu
 
 int main(int argc, char **argv)
 {
-
+        omp_set_num_threads(12);
         /* init parallelisation */
 
         int my_rank;      /* rang du processeur actuel */
