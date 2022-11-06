@@ -6,7 +6,7 @@ p using the block-Lanczos algorithm.
 
 ## Context
 
-The project's aim is to parallelize a sequential program (which is provided) that performs the resolution of linear systems of type : $xM = 0$ mod p, where M is a sparse matrix of size $N  * (N - k)$. 
+The project's aim is to parallelize a sequential program (which is provided) that performs the resolution of linear systems of type : $xM = 0$ mod p, where M is a sparse matrix of size $N  * (N - k)$. You can also refer to my [ project report (in french)](projet_HPC_BENAISSA_SHAO.pdf)
 
 There are three parallelized version:
 
